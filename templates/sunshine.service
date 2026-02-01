@@ -1,0 +1,14 @@
+[Unit]
+Description=Sunshine Game Streaming Host
+Documentation=https://docs.lizardbyte.dev/projects/sunshine/
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sunshine
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

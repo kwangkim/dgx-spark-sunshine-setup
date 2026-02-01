@@ -1,0 +1,291 @@
+#!/bin/bash
+# ============================================================================
+# NVIDIA DGX Spark Sunshine Streaming Setup Uninstaller
+# ============================================================================
+# Completely removes Sunshine and all related configurations
+# ============================================================================
+
+set -e  # Exit on error
+
+# ============================================================================
+# Colors and Formatting (NVIDIA Green Theme)
+# ============================================================================
+readonly NVIDIA_GREEN='\033[38;5;112m'
+readonly BRIGHT_GREEN='\033[1;32m'
+readonly WHITE='\033[1;37m'
+readonly GRAY='\033[0;37m'
+readonly RED='\033[1;31m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[1;34m'
+readonly RESET='\033[0m'
+readonly BOLD='\033[1m'
+readonly DIM='\033[2m'
+
+# ============================================================================
+# Configuration
+# ============================================================================
+readonly SUNSHINE_CONFIG_DIR="${HOME}/.config/sunshine"
+readonly SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+log_info() {
+    echo -e "${NVIDIA_GREEN}▶${RESET} $1"
+}
+
+log_success() {
+    echo -e "${BRIGHT_GREEN}✓${RESET} $1"
+}
+
+log_error() {
+    echo -e "${RED}✗${RESET} $1" >&2
+}
+
+log_warning() {
+    echo -e "${YELLOW}⚠${RESET} $1"
+}
+
+log_step() {
+    echo ""
+    echo -e "${BLUE}${BOLD}┌─ $1${RESET}"
+}
+
+log_substep() {
+    echo -e "${GRAY}│${RESET}  $1"
+}
+
+log_complete() {
+    echo -e "${BLUE}${BOLD}└─${RESET} ${BRIGHT_GREEN}Complete${RESET}"
+}
+
+confirm() {
+    local prompt="$1"
+    local response
+    echo -ne "${YELLOW}?${RESET} ${prompt} ${DIM}[y/N]${RESET}: "
+    read -r response
+    [[ "${response}" =~ ^[Yy]$ ]]
+}
+
+# ============================================================================
+# Print Header
+# ============================================================================
+print_header() {
+    echo ""
+    echo -e "${RED}${BOLD}"
+    echo "  ╔═══════════════════════════════════════════════════════════════╗"
+    echo "  ║                 SUNSHINE UNINSTALLER                          ║"
+    echo "  ║           DGX Spark Streaming Setup Removal                   ║"
+    echo "  ╚═══════════════════════════════════════════════════════════════╝"
+    echo -e "${RESET}"
+    echo -e "${YELLOW}This will completely remove Sunshine and all related configurations.${RESET}"
+    echo ""
+}
+
+# ============================================================================
+# Stop Sunshine Service
+# ============================================================================
+stop_sunshine_service() {
+    log_step "Stopping Sunshine Service"
+
+    if systemctl --user is-active sunshine &>/dev/null; then
+        log_substep "Stopping sunshine service..."
+        systemctl --user stop sunshine
+        log_success "Sunshine service stopped"
+    else
+        log_substep "Sunshine service is not running"
+    fi
+
+    if systemctl --user is-enabled sunshine &>/dev/null; then
+        log_substep "Disabling sunshine service..."
+        systemctl --user disable sunshine
+        log_success "Sunshine service disabled"
+    else
+        log_substep "Sunshine service is not enabled"
+    fi
+
+    log_complete
+}
+
+# ============================================================================
+# Remove Sunshine Package
+# ============================================================================
+remove_sunshine_package() {
+    log_step "Removing Sunshine Package"
+
+    if dpkg -l | grep -q "^ii  sunshine"; then
+        log_substep "Removing sunshine package..."
+        sudo apt-get remove --purge -y sunshine
+        log_success "Sunshine package removed"
+    else
+        log_warning "Sunshine package not found"
+    fi
+
+    # Clean up any leftover dependencies
+    log_substep "Cleaning up unused dependencies..."
+    sudo apt-get autoremove -y
+    log_success "Dependencies cleaned"
+
+    log_complete
+}
+
+# ============================================================================
+# Remove Configuration Files
+# ============================================================================
+remove_configurations() {
+    log_step "Removing Configuration Files"
+
+    # Remove Sunshine config directory
+    if [[ -d "${SUNSHINE_CONFIG_DIR}" ]]; then
+        log_substep "Removing ${SUNSHINE_CONFIG_DIR}..."
+        rm -rf "${SUNSHINE_CONFIG_DIR}"
+        log_success "Sunshine config directory removed"
+    else
+        log_substep "Sunshine config directory not found"
+    fi
+
+    # Remove systemd service files
+    if [[ -f "${SYSTEMD_USER_DIR}/sunshine.service" ]]; then
+        log_substep "Removing sunshine.service..."
+        rm -f "${SYSTEMD_USER_DIR}/sunshine.service"
+        log_success "User sunshine.service removed"
+    fi
+
+    if [[ -d "${SYSTEMD_USER_DIR}/sunshine.service.d" ]]; then
+        log_substep "Removing sunshine.service.d override directory..."
+        rm -rf "${SYSTEMD_USER_DIR}/sunshine.service.d"
+        log_success "Systemd override directory removed"
+    fi
+
+    # Reload systemd
+    log_substep "Reloading systemd daemon..."
+    systemctl --user daemon-reload
+    log_success "Systemd reloaded"
+
+    log_complete
+}
+
+# ============================================================================
+# Remove X11 Configuration
+# ============================================================================
+remove_x11_config() {
+    log_step "Removing X11 Configuration"
+
+    # Remove xorg.conf
+    if [[ -f "/etc/X11/xorg.conf" ]]; then
+        log_substep "Removing /etc/X11/xorg.conf..."
+        sudo rm -f /etc/X11/xorg.conf
+        log_success "xorg.conf removed"
+        log_warning "X11 will use default auto-configuration after restart"
+    else
+        log_substep "xorg.conf not found"
+    fi
+
+    # Remove EDID file
+    if [[ -f "/etc/X11/4k120.edid" ]]; then
+        log_substep "Removing /etc/X11/4k120.edid..."
+        sudo rm -f /etc/X11/4k120.edid
+        log_success "EDID file removed"
+    else
+        log_substep "EDID file not found"
+    fi
+
+    log_complete
+}
+
+# ============================================================================
+# Remove udev Rules
+# ============================================================================
+remove_udev_rules() {
+    log_step "Removing udev Rules"
+
+    if [[ -f "/etc/udev/rules.d/85-sunshine.rules" ]]; then
+        log_substep "Removing /etc/udev/rules.d/85-sunshine.rules..."
+        sudo rm -f /etc/udev/rules.d/85-sunshine.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger
+        log_success "Sunshine udev rules removed"
+    else
+        log_substep "Sunshine udev rules not found"
+    fi
+
+    log_complete
+}
+
+# ============================================================================
+# Optional: Remove User from Groups
+# ============================================================================
+remove_user_groups() {
+    log_step "User Group Cleanup"
+
+    echo ""
+    echo -e "${YELLOW}The installer added your user to 'video' and 'input' groups.${RESET}"
+    echo -e "${GRAY}These groups are commonly used by other applications too.${RESET}"
+    echo ""
+
+    if confirm "Remove user from 'video' and 'input' groups?"; then
+        log_substep "Removing user from groups..."
+        sudo deluser "${USER}" video 2>/dev/null || true
+        sudo deluser "${USER}" input 2>/dev/null || true
+        log_success "User removed from groups"
+        log_warning "Changes will take effect after logout/reboot"
+    else
+        log_info "Keeping user in video and input groups"
+    fi
+
+    log_complete
+}
+
+# ============================================================================
+# Print Final Message
+# ============================================================================
+print_final_message() {
+    echo ""
+    echo -e "${NVIDIA_GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${WHITE}${BOLD}Uninstallation Complete!${RESET}"
+    echo -e "${NVIDIA_GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    echo -e "${WHITE}${BOLD}What was removed:${RESET}"
+    echo -e "${GRAY}  ✓${RESET} Sunshine package"
+    echo -e "${GRAY}  ✓${RESET} Sunshine configuration (~/.config/sunshine)"
+    echo -e "${GRAY}  ✓${RESET} Systemd user service files"
+    echo -e "${GRAY}  ✓${RESET} X11 xorg.conf (virtual display config)"
+    echo -e "${GRAY}  ✓${RESET} Custom EDID file"
+    echo -e "${GRAY}  ✓${RESET} Sunshine udev rules"
+    echo ""
+    echo -e "${YELLOW}${BOLD}Recommended:${RESET}"
+    echo -e "${GRAY}  •${RESET} Restart your system: ${DIM}sudo reboot${RESET}"
+    echo ""
+    echo -e "${NVIDIA_GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+}
+
+# ============================================================================
+# Main Uninstall Flow
+# ============================================================================
+main() {
+    print_header
+
+    if ! confirm "Are you sure you want to completely uninstall Sunshine?"; then
+        log_warning "Uninstallation cancelled"
+        exit 0
+    fi
+
+    echo ""
+
+    stop_sunshine_service
+    remove_sunshine_package
+    remove_configurations
+    remove_x11_config
+    remove_udev_rules
+    remove_user_groups
+
+    print_final_message
+}
+
+# ============================================================================
+# Entry Point
+# ============================================================================
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

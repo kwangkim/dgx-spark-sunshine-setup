@@ -182,13 +182,15 @@ configure_resolution() {
     echo ""
     echo -e "${WHITE}${BOLD}Available Resolutions:${RESET}"
     echo -e "${GRAY}  1)${RESET} 3840x2160 @ 60Hz  ${DIM}(4K, lower refresh rate)${RESET}"
-    echo -e "${GRAY}  2)${RESET} 2560x1440 @ 120Hz ${DIM}(1440p, higher refresh rate)${RESET} ${NVIDIA_GREEN}[Recommended]${RESET}"
-    echo -e "${GRAY}  3)${RESET} 1920x1080 @ 120Hz ${DIM}(1080p, higher refresh rate)${RESET}"
+    echo -e "${GRAY}  2)${RESET} 3440x1440 @ 60Hz  ${DIM}(Dell AW3420DW Ultrawide 21:9)${RESET}"
+    echo -e "${GRAY}  3)${RESET} 2732x2048 @ 60Hz  ${DIM}(iPad Pro 12.9 M2)${RESET}"
+    echo -e "${GRAY}  4)${RESET} 2560x1440 @ 120Hz ${DIM}(1440p, higher refresh rate)${RESET} ${NVIDIA_GREEN}[Recommended]${RESET}"
+    echo -e "${GRAY}  5)${RESET} 1920x1080 @ 120Hz ${DIM}(1080p, higher refresh rate)${RESET}"
     echo ""
 
     local choice
     while true; do
-        prompt_user "Select resolution (1-3)" choice
+        prompt_user "Select resolution (1-5)" choice
         case "${choice}" in
             1)
                 RESOLUTION="3840x2160"
@@ -196,17 +198,27 @@ configure_resolution() {
                 break
                 ;;
             2)
+                RESOLUTION="3440x1440"
+                REFRESH_RATE="60"
+                break
+                ;;
+            3)
+                RESOLUTION="2732x2048"
+                REFRESH_RATE="60"
+                break
+                ;;
+            4)
                 RESOLUTION="2560x1440"
                 REFRESH_RATE="120"
                 break
                 ;;
-            3)
+            5)
                 RESOLUTION="1920x1080"
                 REFRESH_RATE="120"
                 break
                 ;;
             *)
-                log_error "Invalid selection. Please choose 1-3."
+                log_error "Invalid selection. Please choose 1-5."
                 ;;
         esac
     done
@@ -402,10 +414,16 @@ install_sunshine() {
     release_info=$(curl -sL "${SUNSHINE_RELEASE_URL}")
 
     local download_url
-    download_url=$(echo "${release_info}" | grep -o "https://.*sunshine.*arm64\.deb" | head -1)
+    # Specifically get Ubuntu 24.04 ARM64 package (not Debian Trixie which has library version mismatches)
+    download_url=$(echo "${release_info}" | grep -o "https://[^\"]*sunshine-ubuntu-24\.04-arm64\.deb" | head -1)
+    
+    # Fallback to any Ubuntu ARM64 package
+    if [[ -z "${download_url}" ]]; then
+        download_url=$(echo "${release_info}" | grep -o "https://[^\"]*sunshine-ubuntu.*arm64\.deb" | head -1)
+    fi
 
     if [[ -z "${download_url}" ]]; then
-        log_error "Failed to find ARM64 .deb package in latest release"
+        log_error "Failed to find Ubuntu ARM64 .deb package in latest release"
         exit 1
     fi
 
@@ -467,16 +485,36 @@ configure_x11() {
     # Detect GPU BusID
     log_substep "Detecting NVIDIA GPU BusID..."
     local bus_id
-    bus_id=$(lspci | grep -i "nvidia.*gb10" | awk '{print $1}')
+    # First try to find VGA controller from NVIDIA
+    bus_id=$(lspci | grep -i "VGA compatible controller: NVIDIA" | awk '{print $1}')
+    
+    # Fallback: try to find any NVIDIA GPU-like device
+    if [[ -z "${bus_id}" ]]; then
+        bus_id=$(lspci | grep -i "nvidia.*gb10" | awk '{print $1}')
+    fi
 
     if [[ -z "${bus_id}" ]]; then
-        log_error "Failed to detect GB10 GPU BusID"
+        log_error "Failed to detect NVIDIA GPU BusID"
+        log_substep "Please check 'lspci | grep -i nvidia' output"
         exit 1
     fi
 
-    # Convert from domain:bus:device.function to PCI:domain@bus:device:function
-    local pci_bus_id="PCI:${bus_id//:/@}"
-    pci_bus_id="PCI:${pci_bus_id//./:}"
+    # Convert from domain:bus:device.function to PCI:bus:device:function format
+    # lspci shows: 000f:01:00.0 -> we need: PCI:15:1:0
+    # Extract components
+    local domain bus device func
+    domain=$(echo "${bus_id}" | cut -d: -f1)
+    bus=$(echo "${bus_id}" | cut -d: -f2)
+    device=$(echo "${bus_id}" | cut -d: -f3 | cut -d. -f1)
+    func=$(echo "${bus_id}" | cut -d. -f2)
+    
+    # Convert hex to decimal
+    domain=$((16#${domain}))
+    bus=$((16#${bus}))
+    device=$((16#${device}))
+    func=$((10#${func}))
+    
+    local pci_bus_id="PCI:${bus}:${device}:${func}"
 
     log_success "Detected BusID: ${pci_bus_id}"
 
@@ -494,6 +532,28 @@ configure_x11() {
 
     log_success "X11 configuration installed"
     log_warning "X11 restart required - display will be reconfigured on next login"
+    log_complete
+}
+
+# ============================================================================
+# Permissions Configuration
+# ============================================================================
+configure_permissions() {
+    log_step "Configuring Permissions"
+
+    log_substep "Adding current user to 'video' and 'input' groups..."
+    sudo usermod -aG video,input "${USER}"
+    log_success "User added to groups"
+
+    log_substep "Configuring udev rules for uinput..."
+    local udev_rule='KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"'
+    echo "${udev_rule}" | sudo tee /etc/udev/rules.d/85-sunshine.rules > /dev/null
+    
+    log_substep "Reloading udev rules..."
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+    log_success "udev rules configured"
+
     log_complete
 }
 
@@ -517,7 +577,16 @@ configure_sunshine() {
 
     # Configure systemd user service
     log_substep "Configuring systemd user service..."
+    mkdir -p "${SYSTEMD_USER_DIR}"
     mkdir -p "${SYSTEMD_USER_DIR}/sunshine.service.d"
+    
+    # Install the base service file (newer Sunshine versions don't include one)
+    if [[ ! -f "${SYSTEMD_USER_DIR}/sunshine.service" ]]; then
+        log_substep "Installing sunshine.service..."
+        cp "${TEMPLATES_DIR}/sunshine.service" "${SYSTEMD_USER_DIR}/sunshine.service"
+    fi
+    
+    # Install the override configuration
     cp "${TEMPLATES_DIR}/sunshine-override.conf" "${SYSTEMD_USER_DIR}/sunshine.service.d/override.conf"
 
     # Reload systemd
@@ -530,6 +599,16 @@ configure_sunshine() {
     if confirm "Enable Sunshine to start automatically on login?"; then
         systemctl --user enable sunshine
         log_success "Sunshine service enabled (will start automatically on next login)"
+        
+        # Enable lingering for user session persistence
+        # This allows the user's systemd services to start at boot, even before GUI login
+        log_substep "Enabling session persistence (lingering)..."
+        if loginctl enable-linger "$(whoami)" 2>/dev/null; then
+            log_success "Session lingering enabled for reliable auto-start"
+        else
+            log_warning "Could not enable lingering - Sunshine may not start until first login"
+            log_substep "To enable manually: ${DIM}loginctl enable-linger $(whoami)${RESET}"
+        fi
     else
         log_info "Sunshine service configured but not enabled for auto-start"
         log_substep "To start manually: ${DIM}systemctl --user start sunshine${RESET}"
@@ -675,6 +754,7 @@ main() {
     install_sunshine
     install_edid
     configure_x11
+    configure_permissions
     configure_sunshine
     validate_installation
 

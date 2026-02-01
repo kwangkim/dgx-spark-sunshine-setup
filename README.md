@@ -18,6 +18,8 @@ Stream your DGX Spark desktop at high quality (up to 1440p @ 120Hz or 4K @ 60Hz)
 
 ### Display Resolutions
 - **4K @ 60Hz** (3840x2160) - Maximum resolution, lower refresh rate
+- **Ultrawide @ 60Hz** (3440x1440) - Dell AW3420DW and similar 21:9 monitors
+- **iPad Pro 12.9 @ 60Hz** (2732x2048) - Native iPad Pro M2 resolution via Tailscale
 - **1440p @ 120Hz** (2560x1440) - **Recommended** - Best balance of quality and smoothness
 - **1080p @ 120Hz** (1920x1080) - Lower resolution, maximum smoothness
 
@@ -37,6 +39,8 @@ The GB10's unified memory architecture has a **165 MHz pixel clock limitation**,
 
 **What Works**:
 - ✅ 4K @ 60Hz
+- ✅ 3440x1440 @ 60Hz (Ultrawide)
+- ✅ 2732x2048 @ 60Hz (iPad Pro 12.9)
 - ✅ 1440p @ 120Hz
 - ✅ 1080p @ 120Hz
 
@@ -47,7 +51,7 @@ The GB10's unified memory architecture has a **165 MHz pixel clock limitation**,
 
 ### Required
 - **Hardware**: NVIDIA DGX Spark with GB10 GPU
-- **OS**: Ubuntu 24.04 (or similar Debian-based distribution)
+- **OS**: Ubuntu 24.04.3 LTS (DGX OS 7.3.1 or newer)
 - **NVIDIA Driver**: Version 580.95.05 or newer
 - **Desktop Environment**: X11-based (GDM, GNOME, etc.)
 - **Auto-login**: Configured for your user account (required for headless operation)
@@ -204,6 +208,29 @@ journalctl --user -u sunshine -f
 # Verify environment variables
 systemctl --user show sunshine -p Environment
 ```
+
+### Sunshine Not Starting Automatically After Reboot
+
+**Problem**: Sunshine doesn't start automatically after system reboot, only after GUI login
+
+**Cause**: Systemd user services require either a user session or "lingering" to start at boot.
+
+**Solutions**:
+```bash
+# Enable session lingering for your user (allows services to start at boot)
+loginctl enable-linger $(whoami)
+
+# Verify lingering is enabled
+loginctl show-user $(whoami) --property=Linger
+
+# Re-enable Sunshine auto-start
+systemctl --user enable sunshine
+
+# Reboot and verify
+sudo reboot
+```
+
+**Note**: The installer now enables lingering automatically when you choose auto-start.
 
 ### Connection Issues
 

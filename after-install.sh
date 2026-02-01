@@ -132,6 +132,17 @@ check_sunshine_service() {
         log_success "Sunshine service is enabled for auto-start"
     fi
 
+    # Check session lingering status (required for reliable auto-start)
+    local linger_status
+    linger_status=$(loginctl show-user "$(whoami)" --property=Linger 2>/dev/null | cut -d= -f2)
+    if [[ "$linger_status" == "yes" ]]; then
+        log_success "Session lingering enabled (Sunshine can start at boot)"
+    else
+        log_warning "Session lingering not enabled"
+        echo -e "${GRAY}  Sunshine may not start until GUI login${RESET}"
+        echo -e "${GRAY}  To enable: ${DIM}loginctl enable-linger $(whoami)${RESET}"
+    fi
+
     echo ""
 
     if systemctl --user is-active sunshine &> /dev/null; then
