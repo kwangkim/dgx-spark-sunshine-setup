@@ -103,7 +103,7 @@ prompt_secret() {
     local prompt="$1"
     local var_name="$2"
     echo -ne "${NVIDIA_GREEN}?${RESET} ${prompt}: "
-    read -rs "${var_name}"
+    read -rs "$var_name"
     echo ""
 }
 
