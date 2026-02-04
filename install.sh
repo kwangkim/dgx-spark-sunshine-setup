@@ -451,8 +451,17 @@ install_sunshine() {
     fi
 
     log_substep "Fetching latest release information..."
-    local release_info
-    release_info=$(curl -sL "${SUNSHINE_RELEASE_URL}")
+    local release_info http_code
+    # Fetch release info with error handling for both network and HTTP failures
+    if ! release_info=$(curl -sL --fail-with-body "${SUNSHINE_RELEASE_URL}"); then
+        log_error "Failed to fetch release info from GitHub (network error or rate-limited)"
+        log_substep "Check your internet connection or try again later"
+        exit 1
+    fi
+    if [[ -z "${release_info}" ]]; then
+        log_error "Empty response from GitHub API"
+        exit 1
+    fi
 
     local download_url
     # Specifically get Ubuntu 24.04 ARM64 package (not Debian Trixie which has library version mismatches)
@@ -468,12 +477,22 @@ install_sunshine() {
         exit 1
     fi
 
-    local deb_file="/tmp/sunshine-arm64.deb"
+    local deb_file
+    deb_file=$(mktemp /tmp/sunshine-XXXXXX.deb)
+    TEMP_FILES+=("${deb_file}")
+
     log_substep "Downloading: ${download_url##*/}"
-    curl -L -o "${deb_file}" "${download_url}"
+    if ! curl -L --fail -o "${deb_file}" "${download_url}"; then
+        log_error "Failed to download Sunshine .deb package"
+        log_substep "URL: ${download_url}"
+        exit 1
+    fi
 
     log_substep "Installing Sunshine package..."
-    sudo apt-get install -y "${deb_file}"
+    if ! sudo apt-get install -y "${deb_file}"; then
+        log_error "Failed to install Sunshine .deb package"
+        exit 1
+    fi
 
     rm -f "${deb_file}"
 
@@ -550,6 +569,16 @@ configure_x11() {
     device=$(echo "${bus_id}" | cut -d: -f3 | cut -d. -f1)
     func=$(echo "${bus_id}" | cut -d. -f2)
 
+    # Validate hex format before conversion
+    if [[ ! "${domain}" =~ ^[0-9a-fA-F]+$ ]] || \
+       [[ ! "${bus}" =~ ^[0-9a-fA-F]+$ ]] || \
+       [[ ! "${device}" =~ ^[0-9a-fA-F]+$ ]] || \
+       [[ ! "${func}" =~ ^[0-9a-fA-F]+$ ]]; then
+        log_error "GPU BusID contains non-hex values: ${bus_id}"
+        log_substep "Expected format: domain:bus:device.function (hex digits)"
+        exit 1
+    fi
+
     # Convert hex to decimal
     domain=$((16#${domain}))
     bus=$((16#${bus}))
@@ -558,11 +587,23 @@ configure_x11() {
 
     local pci_bus_id="PCI:${bus}:${device}:${func}"
 
+    # Validate BusID format for safe sed substitution
+    if [[ ! "${pci_bus_id}" =~ ^PCI:[0-9]+:[0-9]+:[0-9]+$ ]]; then
+        log_error "Invalid BusID format generated: ${pci_bus_id}"
+        exit 1
+    fi
+
     log_success "Detected BusID: ${pci_bus_id}"
 
     # Generate xorg.conf from template
     log_substep "Generating xorg.conf from template..."
-    local temp_xorg="/tmp/xorg.conf.tmp"
+    if [[ ! -f "${TEMPLATES_DIR}/xorg.conf.template" ]]; then
+        log_error "xorg.conf template not found: ${TEMPLATES_DIR}/xorg.conf.template"
+        exit 1
+    fi
+    local temp_xorg
+    temp_xorg=$(mktemp /tmp/xorg.conf.XXXXXX)
+    TEMP_FILES+=("${temp_xorg}")
     sed -e "s|{{BUS_ID}}|${pci_bus_id}|g" \
         -e "s|{{EDID_PATH}}|/etc/X11/4k120.edid|g" \
         "${TEMPLATES_DIR}/xorg.conf.template" > "${temp_xorg}"
@@ -587,6 +628,8 @@ configure_permissions() {
     sudo usermod -aG video,input "${USER}"
     log_success "User added to groups"
 
+    # NOTE: uinput access allows Sunshine to forward remote input (keyboard/mouse).
+    # This grants the logged-in user the ability to create virtual input devices.
     log_substep "Configuring udev rules for uinput..."
     local udev_rule='KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"'
     echo "${udev_rule}" | sudo tee /etc/udev/rules.d/85-sunshine.rules > /dev/null
@@ -606,10 +649,14 @@ configure_sunshine() {
     log_step "Configuring Sunshine"
 
     # Create config directory
-    mkdir -p "${SUNSHINE_CONFIG_DIR}"
+    mkdir -p -m 700 "${SUNSHINE_CONFIG_DIR}"
 
     # Generate sunshine.conf from template
     log_substep "Generating sunshine.conf..."
+    if [[ ! -f "${TEMPLATES_DIR}/sunshine.conf.template" ]]; then
+        log_error "sunshine.conf template not found: ${TEMPLATES_DIR}/sunshine.conf.template"
+        exit 1
+    fi
     sed -e "s|{{CODEC}}|${CODEC}|g" \
         -e "s|{{BITRATE}}|${BITRATE}|g" \
         -e "s|{{FPS}}|${REFRESH_RATE}|g" \
@@ -625,10 +672,18 @@ configure_sunshine() {
     # Install the base service file (newer Sunshine versions don't include one)
     if [[ ! -f "${SYSTEMD_USER_DIR}/sunshine.service" ]]; then
         log_substep "Installing sunshine.service..."
+        if [[ ! -f "${TEMPLATES_DIR}/sunshine.service" ]]; then
+            log_error "sunshine.service template not found"
+            exit 1
+        fi
         cp "${TEMPLATES_DIR}/sunshine.service" "${SYSTEMD_USER_DIR}/sunshine.service"
     fi
 
     # Install the override configuration
+    if [[ ! -f "${TEMPLATES_DIR}/sunshine-override.conf" ]]; then
+        log_error "sunshine-override.conf template not found"
+        exit 1
+    fi
     cp "${TEMPLATES_DIR}/sunshine-override.conf" "${SYSTEMD_USER_DIR}/sunshine.service.d/override.conf"
 
     # Reload systemd
@@ -756,6 +811,9 @@ configure_tailscale() {
                     break
                     ;;
                 2)
+                    # Security: auth key is read with terminal echo disabled (read -rs)
+                    # and passed directly to tailscale up. The key is briefly visible
+                    # in process listing (ps) while the command runs.
                     prompt_secret "Enter Tailscale auth key (tskey-auth-...)" auth_key
                     if [[ -z "${auth_key}" ]]; then
                         log_warning "No auth key provided; falling back to interactive login"
