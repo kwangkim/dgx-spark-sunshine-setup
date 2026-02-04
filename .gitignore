@@ -25,3 +25,4 @@ edid/*.bin
 # Testing artifacts
 test-output/
 *.test
+.planning/
