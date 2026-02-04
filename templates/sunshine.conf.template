@@ -23,3 +23,13 @@ nvenc_rc = cbr
 
 # Performance
 channels = 2
+
+# Custom Resolutions
+# iPad Pro 12.9 M2 (2732x2048) and Dell AW3420DW (3440x1440)
+resolutions = [
+    3840x2160,
+    3440x1440,
+    2732x2048,
+    2560x1440,
+    1920x1080
+]
