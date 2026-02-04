@@ -90,9 +90,11 @@ check_virtual_display() {
         log_info "Checking X11 logs for display information..."
         if [[ -f /var/log/Xorg.0.log ]]; then
             local display_info
-            display_info=$(sudo grep -i "DFP-0.*connected\|Mode.*x.*Hz" /var/log/Xorg.0.log 2>/dev/null | tail -3)
+            display_info=$(grep -i "DFP-0.*connected\|Mode.*x.*Hz" /var/log/Xorg.0.log 2>/dev/null | tail -3)
+            # Falls back gracefully: if file is not readable, grep returns empty
             if [[ -n "$display_info" ]]; then
-                echo "$display_info" | sed "s/^/${GRAY}  /"
+                # Strip control characters from log before display (prevent terminal injection)
+                echo "$display_info" | sed 's/[[:cntrl:]]//g' | sed "s/^/${GRAY}  /"
                 echo -e "${RESET}"
             fi
         fi
@@ -251,7 +253,10 @@ view_x11_logs() {
 
     echo ""
     if [[ -f /var/log/Xorg.0.log ]]; then
-        sudo grep -i "edid\|dfp\|connected\|CustomEDID" /var/log/Xorg.0.log | tail -15 | sed "s/^/${GRAY}  /"
+        grep -i "edid\|dfp\|connected\|CustomEDID" /var/log/Xorg.0.log 2>/dev/null | tail -15 | sed "s/^/${GRAY}  /"
+        if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+            log_warning "Cannot read Xorg log — try: sudo cat /var/log/Xorg.0.log"
+        fi
         echo -e "${RESET}"
     else
         log_error "X11 log not found at /var/log/Xorg.0.log"

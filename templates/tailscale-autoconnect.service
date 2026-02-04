@@ -1,12 +1,13 @@
 [Unit]
-Description=Tailscale autoconnect (apply preferences)
+Description=Tailscale autoconnect (re-apply preferences on boot)
 After=network-online.target tailscaled.service
-Wants=network-online.target tailscaled.service
+Requires=tailscaled.service
+Wants=network-online.target
 
 [Service]
 Type=oneshot
 EnvironmentFile=-/etc/default/tailscale-autoconnect
-ExecStart=/bin/sh -c '/usr/bin/tailscale up ${TS_UP_EXTRA_ARGS:-}'
+ExecStart=/usr/bin/tailscale up $TS_UP_EXTRA_ARGS
 RemainAfterExit=yes
 
 [Install]

@@ -1,6 +1,7 @@
 [Unit]
 Description=Sunshine Game Streaming Host
 Documentation=https://docs.lizardbyte.dev/projects/sunshine/
+# Requires graphical session for X11 display access
 After=graphical-session.target
 Wants=graphical-session.target
 
@@ -8,7 +9,14 @@ Wants=graphical-session.target
 Type=simple
 ExecStart=/usr/bin/sunshine
 Restart=on-failure
-RestartSec=5
+# Allow X11 time to initialize before restart attempts (avoids rapid restart loops)
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Security hardening (compatible with GPU/X11 access)
+PrivateTmp=yes
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=default.target
