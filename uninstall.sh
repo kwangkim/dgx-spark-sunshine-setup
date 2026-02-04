@@ -5,7 +5,7 @@
 # Completely removes Sunshine and all related configurations
 # ============================================================================
 
-set -e  # Exit on error
+set -eo pipefail  # Exit on error, catch pipeline failures
 
 # ============================================================================
 # Colors and Formatting (NVIDIA Green Theme)
@@ -123,7 +123,7 @@ stop_sunshine_service() {
 remove_sunshine_package() {
     log_step "Removing Sunshine Package"
 
-    if dpkg -l | grep -q "^ii  sunshine"; then
+    if dpkg -l sunshine 2>/dev/null | grep -q "^[ih]i\|^[rR]c"; then
         log_substep "Removing sunshine package..."
         sudo apt-get remove --purge -y sunshine
         log_success "Sunshine package removed"
@@ -169,7 +169,9 @@ remove_configurations() {
 
     # Reload systemd
     log_substep "Reloading systemd daemon..."
-    systemctl --user daemon-reload
+    if ! systemctl --user daemon-reload; then
+        log_warning "systemd daemon-reload failed — may need to log out and back in"
+    fi
     log_success "Systemd reloaded"
 
     log_complete
@@ -181,12 +183,18 @@ remove_configurations() {
 remove_x11_config() {
     log_step "Removing X11 Configuration"
 
-    # Remove xorg.conf
+    # Remove xorg.conf (validate it was created by our installer)
     if [[ -f "/etc/X11/xorg.conf" ]]; then
-        log_substep "Removing /etc/X11/xorg.conf..."
-        sudo rm -f /etc/X11/xorg.conf
-        log_success "xorg.conf removed"
-        log_warning "X11 will use default auto-configuration after restart"
+        # Verify this xorg.conf was created by our installer before removing
+        if grep -q "DGX Spark Sunshine Setup Installer" /etc/X11/xorg.conf 2>/dev/null; then
+            log_substep "Removing /etc/X11/xorg.conf (created by installer)..."
+            sudo rm -f /etc/X11/xorg.conf
+            log_success "xorg.conf removed"
+            log_warning "X11 will use default auto-configuration after restart"
+        else
+            log_warning "xorg.conf exists but was NOT created by this installer — skipping removal"
+            log_substep "To remove manually: ${DIM}sudo rm /etc/X11/xorg.conf${RESET}"
+        fi
     else
         log_substep "xorg.conf not found"
     fi
@@ -232,6 +240,11 @@ remove_user_groups() {
     echo -e "${YELLOW}The installer added your user to 'video' and 'input' groups.${RESET}"
     echo -e "${GRAY}These groups are commonly used by other applications too.${RESET}"
     echo ""
+    echo -e "${YELLOW}Warning: Other apps may use these groups:${RESET}"
+    echo -e "${GRAY}  • video: GPU access (CUDA, Docker GPU passthrough)${RESET}"
+    echo -e "${GRAY}  • input: Gamepads, input devices${RESET}"
+    echo -e "${GRAY}If unsure, keep them — they are harmless.${RESET}"
+    echo ""
 
     if confirm "Remove user from 'video' and 'input' groups?"; then
         log_substep "Removing user from groups..."
@@ -242,6 +255,63 @@ remove_user_groups() {
     else
         log_info "Keeping user in video and input groups"
     fi
+
+    log_complete
+}
+
+# ============================================================================
+# Restore Backed-Up Files
+# ============================================================================
+restore_backups() {
+    log_step "Backup Restoration"
+
+    # Find the most recent backup directory
+    local backup_base="${HOME}/.sunshine-setup-backups"
+    if [[ ! -d "${backup_base}" ]]; then
+        log_substep "No backup directory found"
+        log_complete
+        return
+    fi
+
+    # Find the latest backup
+    local latest_backup
+    latest_backup=$(ls -dt "${backup_base}"/backup-* 2>/dev/null | head -1)
+    # Handle old format without backup- prefix
+    if [[ -z "${latest_backup}" ]]; then
+        latest_backup=$(ls -dt "${backup_base}"/*/ 2>/dev/null | head -1)
+    fi
+
+    if [[ -z "${latest_backup}" || ! -d "${latest_backup}" ]]; then
+        log_substep "No backups found in ${backup_base}"
+        log_complete
+        return
+    fi
+
+    log_substep "Found backup: ${latest_backup}"
+
+    # Offer to restore xorg.conf
+    if [[ -f "${latest_backup}/xorg.conf" ]]; then
+        if confirm "Restore original xorg.conf from backup?"; then
+            sudo cp "${latest_backup}/xorg.conf" /etc/X11/xorg.conf
+            sudo chmod 644 /etc/X11/xorg.conf
+            log_success "xorg.conf restored from backup"
+        else
+            log_info "Skipping xorg.conf restoration"
+        fi
+    fi
+
+    # Offer to restore EDID files
+    shopt -s nullglob
+    local edid_files=("${latest_backup}"/*.edid)
+    if [[ ${#edid_files[@]} -gt 0 ]]; then
+        if confirm "Restore backed-up EDID files?"; then
+            sudo cp "${edid_files[@]}" /etc/X11/
+            log_success "EDID files restored from backup"
+        else
+            log_info "Skipping EDID restoration"
+        fi
+    fi
+    shopt -u nullglob
 
     log_complete
 }
@@ -287,6 +357,7 @@ main() {
     remove_sunshine_package
     remove_configurations
     remove_x11_config
+    restore_backups
     remove_udev_rules
     remove_user_groups
 
