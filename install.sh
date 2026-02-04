@@ -6,7 +6,7 @@
 # on NVIDIA DGX Spark (GB10) systems
 # ============================================================================
 
-set -e  # Exit on error
+set -eo pipefail  # Exit on error, catch pipeline failures
 
 # ============================================================================
 # Colors and Formatting (NVIDIA Green Theme)
@@ -42,6 +42,10 @@ BITRATE=""
 EDID_SOURCE=""
 CUSTOM_EDID_PATH=""
 
+# Cleanup state
+TEMP_FILES=()
+INSTALLATION_STARTED=false
+
 # ============================================================================
 # ASCII Logo and Header
 # ============================================================================
@@ -59,6 +63,25 @@ print_logo() {
     echo -e "${DIM}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
 }
+
+cleanup() {
+    local exit_code=$?
+    # Remove temp files
+    for f in "${TEMP_FILES[@]}"; do
+        [[ -f "$f" ]] && rm -f "$f" 2>/dev/null
+    done
+    # On failure, inform user about backups
+    if [[ ${exit_code} -ne 0 && "${INSTALLATION_STARTED}" == true ]]; then
+        echo -e "${RED}Installation failed.${RESET}" >&2
+        if [[ -n "${BACKUP_DIR:-}" && -d "${BACKUP_DIR}" ]]; then
+            echo -e "Backups available at: ${BACKUP_DIR}" >&2
+            echo -e "To restore: sudo cp ${BACKUP_DIR}/xorg.conf /etc/X11/ 2>/dev/null" >&2
+        fi
+    fi
+    exit ${exit_code}
+}
+trap cleanup EXIT
+trap 'echo -e "${RED}Error at line ${LINENO}${RESET}" >&2' ERR
 
 # ============================================================================
 # Utility Functions
@@ -362,28 +385,38 @@ print_configuration_summary() {
 create_backup() {
     log_step "Creating Backups"
 
-    mkdir -p "${BACKUP_DIR}"
+    mkdir -p -m 700 "${BACKUP_DIR}"
     log_substep "Backup directory: ${BACKUP_DIR}"
+    INSTALLATION_STARTED=true
 
-    # Backup xorg.conf if it exists
-    if [[ -f "/etc/X11/xorg.conf" ]]; then
-        log_substep "Backing up /etc/X11/xorg.conf..."
-        sudo cp /etc/X11/xorg.conf "${BACKUP_DIR}/xorg.conf"
+    # Backup xorg.conf (EAFP: try copy, handle failure)
+    if sudo cp /etc/X11/xorg.conf "${BACKUP_DIR}/xorg.conf" 2>/dev/null; then
         log_success "xorg.conf backed up"
+    else
+        log_substep "No existing xorg.conf to backup"
     fi
 
-    # Backup existing EDID files
-    if ls /etc/X11/*.edid &> /dev/null; then
-        log_substep "Backing up existing EDID files..."
-        sudo cp /etc/X11/*.edid "${BACKUP_DIR}/" 2>/dev/null || true
-        log_success "EDID files backed up"
+    # Backup existing EDID files (EAFP: try copy, handle failure)
+    shopt -s nullglob
+    local edid_files=(/etc/X11/*.edid)
+    if [[ ${#edid_files[@]} -gt 0 ]]; then
+        if sudo cp "${edid_files[@]}" "${BACKUP_DIR}/" 2>/dev/null; then
+            log_success "EDID files backed up"
+        else
+            log_warning "Failed to backup some EDID files"
+        fi
+    else
+        log_substep "No existing EDID files to backup"
     fi
+    shopt -u nullglob
 
     # Backup Sunshine config if it exists
     if [[ -d "${SUNSHINE_CONFIG_DIR}" ]]; then
-        log_substep "Backing up Sunshine configuration..."
-        cp -r "${SUNSHINE_CONFIG_DIR}" "${BACKUP_DIR}/sunshine"
-        log_success "Sunshine config backed up"
+        if cp -r "${SUNSHINE_CONFIG_DIR}" "${BACKUP_DIR}/sunshine" 2>/dev/null; then
+            log_success "Sunshine config backed up"
+        else
+            log_warning "Failed to backup Sunshine config"
+        fi
     fi
 
     # Backup systemd override if it exists
