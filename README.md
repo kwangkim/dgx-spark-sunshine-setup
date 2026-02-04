@@ -1,264 +1,138 @@
-# NVIDIA DGX Spark Sunshine Streaming Setup
+ # NVIDIA DGX Spark Sunshine Streaming Setup
 
 ![DGX Spark Sunshine Installer](img/install.png)
 
-Automated installer for [Sunshine](https://github.com/LizardByte/Sunshine) game streaming with virtual display configuration on NVIDIA DGX Spark (GB10) systems.
+One-command installer that sets up [Sunshine](https://github.com/LizardByte/Sunshine) + a virtual X11 display on NVIDIA DGX Spark (GB10), so you can stream the desktop with Moonlight without a monitor attached.
 
-Stream your DGX Spark desktop at high quality (up to 1440p @ 120Hz or 4K @ 60Hz) without needing a physical monitor attached.
-
-## Features
-
-- **Virtual Display Configuration**: Creates a virtual display using NVIDIA's CustomEDID feature
-- **No Physical Monitor Required**: Works completely headless using EDID emulation
-- **Interactive Installation**: Guided prompts for resolution, codec, and bitrate selection
-- **Automatic Backups**: All existing configurations are backed up before modification
-- **Hardware-Accelerated Encoding**: Uses NVENC (NVIDIA's hardware encoder) for optimal performance
--
-## Supported Configurations
-
-### Display Resolutions
-- **4K @ 60Hz** (3840x2160) - Maximum resolution, lower refresh rate
-- **Ultrawide @ 60Hz** (3440x1440) - Dell AW3420DW and similar 21:9 monitors
-- **iPad Pro 12.9 @ 60Hz** (2732x2048) - Native iPad Pro M2 resolution via Tailscale
-- **1440p @ 120Hz** (2560x1440) - **Recommended** - Best balance of quality and smoothness
-- **1080p @ 120Hz** (1920x1080) - Lower resolution, maximum smoothness
-
-### Video Codecs
-- **HEVC (H.265)** - **Recommended** - Best compatibility, good compression
-- **AV1** - Better compression, requires newer client devices
-- **H.264** - Maximum compatibility, larger bandwidth requirements
-
-### Bitrate Recommendations
-- **LAN (Gigabit)**: 100-200 Mbps
-- **LAN (Wi-Fi)**: 50-100 Mbps
-- **Remote (VPN)**: 20-50 Mbps
-
-## Hardware Limitations
-
-The GB10's unified memory architecture has a **165 MHz pixel clock limitation**, which prevents native 4K @ 120Hz (requires ~1200 MHz pixel clock). This is a hardware constraint, not a software limitation.
-
-**What Works**:
-- ✅ 4K @ 60Hz
-- ✅ 3440x1440 @ 60Hz (Ultrawide)
-- ✅ 2732x2048 @ 60Hz (iPad Pro 12.9)
-- ✅ 1440p @ 120Hz
-- ✅ 1080p @ 120Hz
-
-**What Doesn't Work**:
-- ❌ 4K @ 120Hz (hardware limitation)
-
-## Prerequisites
-
-### Required
-- **Hardware**: NVIDIA DGX Spark with GB10 GPU
-- **OS**: Ubuntu 24.04.3 LTS (DGX OS 7.3.1 or newer)
-- **NVIDIA Driver**: Version 580.95.05 or newer
-- **Desktop Environment**: X11-based (GDM, GNOME, etc.)
-- **Auto-login**: Configured for your user account (required for headless operation)
-
-### Automatic
-The installer will automatically check for and guide you through any missing prerequisites.
-
-## Installation
-
-### Quick Start
+## Quick Start
 
 ```bash
-# Clone the repository
 git clone https://github.com/seanGSISG/dgx-spark-sunshine-setup.git
 cd dgx-spark-sunshine-setup
-
-# Run the installer
 ./install.sh
+sudo reboot
+./after-install.sh
 ```
 
-### Installation Steps
+Then open Sunshine Web UI and pair Moonlight:
 
-The installer will:
+- `https://<YOUR_DGX_IP>:47990`
+- Moonlight client: https://moonlight-stream.org
 
-1. **Check Prerequisites** - Verify hardware, drivers, and required software
-2. **Interactive Configuration** - Prompt you to select:
-   - Display resolution and refresh rate
-   - Video codec (HEVC, AV1, or H.264)
-   - Streaming bitrate
-   - EDID source (bundled or custom)
-3. **Create Backups** - Automatically backup existing configurations
-4. **Install Sunshine** - Download and install the latest ARM64 build
-5. **Configure Virtual Display** - Set up NVIDIA CustomEDID with your selected EDID
-6. **Configure X11** - Generate and install optimized xorg.conf
-7. **Configure Sunshine** - Set up hardware encoding with your preferences
-8. **Validate Installation** - Verify all components are correctly installed
+## What the installer does
 
-### Post-Installation
+- Creates backups in `~/.sunshine-setup-backups/`
+- Installs Sunshine (ARM64 .deb)
+- Installs EDID to `/etc/X11/4k120.edid`
+- Generates `/etc/X11/xorg.conf` using NVIDIA `CustomEDID`
+- Writes Sunshine config to `~/.config/sunshine/sunshine.conf`
+- Installs a systemd **user** service for Sunshine
+- Optionally enables autostart and attempts to enable lingering (`sudo loginctl enable-linger $(whoami)`) for more reliable startup
+- Optionally offers to install/configure Tailscale
 
-After running the installer:
+## Requirements / notes
 
-1. **Reboot your system**
-   ```bash
-   sudo reboot
-   ```
+- DGX Spark (GB10), Ubuntu 24.04
+- X11 desktop session on the DGX (Sunshine captures an X session on `:0`)
+  - For headless operation, you typically need desktop auto-login so a session exists after reboot.
 
-2. **Run the post-installation helper** (Recommended)
-   ```bash
-   ./after-install.sh
-   ```
+### Hardware limitation (GB10)
 
-   The helper provides:
-   - **Automated checks**: Virtual display, Sunshine service, GPU encoding, network access
-   - **Quick actions**: Start/stop/restart Sunshine, view logs, reset credentials
-   - **Troubleshooting**: Detailed diagnostics with step-by-step guidance
-   - **Interactive menu**: Easy-to-use interface or command-line options
+GB10 has a ~165 MHz pixel clock limit. Practical impact: 4K@120Hz won’t work; 4K@60Hz and 1440p@120Hz do.
 
-   **Quick checks:**
-   ```bash
-   ./after-install.sh --check-all        # Run all verification checks
-   ./after-install.sh --check-display    # Check virtual display only
-   ./after-install.sh --check-sunshine   # Check Sunshine service only
-   ./after-install.sh --logs             # View recent Sunshine logs
-   ```
+## Important: X session environment (DISPLAY/XAUTHORITY)
 
-3. **Manual verification** (if not using helper):
-   ```bash
-   # Verify virtual display
-   xrandr
+The Sunshine user service needs access to your X session. Don’t hardcode `XAUTHORITY` in the systemd override; instead, export it into the systemd user manager at session start:
 
-   # Start Sunshine
-   systemctl --user start sunshine
+```bash
+dbus-update-activation-environment --systemd DISPLAY XAUTHORITY
+systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'
+```
 
-   # Configure credentials
-   # Open: https://localhost:47990
-   ```
+If you want it to run every login, `~/.xprofile` is a simple option on many desktops.
 
-4. **Connect with Moonlight**
-   - Download Moonlight client: https://moonlight-stream.org
-   - Scan for your DGX Spark on the network
-   - Enter PIN to pair
+## Optional: Tailscale
 
-## Repository Structure
+During install you can choose to install Tailscale.
+
+- The installer can enable `tailscaled` and optionally run `sudo tailscale up`.
+- It can also install an optional boot-time unit `templates/tailscale-autoconnect.service` that runs `tailscale up` on boot.
+  - Default is safe: it does **not** disable DNS and does **not** include tags.
+  - If you want Tailscale SSH later, set `TS_UP_EXTRA_ARGS="--ssh"` in `/etc/default/tailscale-autoconnect`.
+
+## Using an iPad / SSH setup
+
+See [setup.md](setup.md) for a step-by-step guide for:
+
+- configuring everything from another computer via SSH
+- configuring using only an iPad (Moonlight + Safari + SSH)
+
+## Troubleshooting (fast)
+
+### Sunshine service
+
+```bash
+systemctl --user status sunshine
+journalctl --user -u sunshine -n 200 --no-pager
+```
+
+### Black screen / capture issues
+
+- Ensure a graphical session exists on the DGX (`DISPLAY=:0`). If nobody logs in, there may be nothing to capture.
+- Ensure the systemd user environment has `XAUTHORITY`:
+
+```bash
+systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'
+```
+
+### Autostart after reboot
+
+Systemd user services may require lingering.
+
+```bash
+sudo loginctl enable-linger $(whoami)
+loginctl show-user $(whoami) --property=Linger
+```
+
+Policy note: `loginctl enable-linger` is governed by PolicyKit (`org.freedesktop.login1.set-user-linger`). If PolicyKit is missing/restrictive, it may fail with “Access denied”; `sudo loginctl ...` is the fallback.
+
+### Connectivity
+
+```bash
+curl -k https://localhost:47990
+sudo ufw status
+```
+
+## Uninstall
+
+Run the uninstaller as your normal user (do not run it under sudo):
+
+```bash
+./uninstall.sh
+```
+
+## Repo layout
 
 ```
 dgx-spark-sunshine-setup/
-├── install.sh                    # Main installation script
-├── after-install.sh              # Post-installation helper & troubleshooting tool
-├── img/
-│   └── install.png              # Installer screenshot
+├── install.sh
+├── after-install.sh
+├── uninstall.sh
+├── setup.md
 ├── edid/
-│   └── samsung-q800t.bin        # Bundled EDID file (4K@60Hz, 1440p@120Hz)
-├── templates/
-│   ├── xorg.conf.template       # X11 configuration template
-│   ├── sunshine.conf.template   # Sunshine configuration template
-│   └── sunshine-override.conf   # Systemd environment variables
-└── README.md                    # This file
+├── img/
+└── templates/
+    ├── xorg.conf.template
+    ├── sunshine.conf.template
+    ├── sunshine.service
+    ├── sunshine-override.conf
+    ├── tailscale-autoconnect.service
+    └── tailscale-autoconnect.env.template
 ```
 
-## Configuration Files
+## License
 
-After installation, you'll find:
-
-### X11 Configuration
-- **Location**: `/etc/X11/xorg.conf`
-- **Purpose**: Configures virtual display with CustomEDID
-- **Backup**: Automatically backed up before installation
-
-### EDID File
-- **Location**: `/etc/X11/4k120.edid`
-- **Purpose**: Display capability information for virtual monitor
-- **Source**: Samsung Q800T HDMI 2.1 EDID (or custom)
-
-### Sunshine Configuration
-- **Location**: `~/.config/sunshine/sunshine.conf`
-- **Purpose**: Streaming quality settings, encoder configuration
-- **Backup**: Automatically backed up before installation
-
-### Systemd Override
-- **Location**: `~/.config/systemd/user/sunshine.service.d/override.conf`
-- **Purpose**: Sets `DISPLAY` for Sunshine; `XAUTHORITY` should be inherited from your X session environment
-- **Auto-start**: Sunshine will start automatically on login
-
-If Sunshine can’t access your X session, ensure your session exports variables into the user systemd manager:
-```bash
-dbus-update-activation-environment --systemd DISPLAY XAUTHORITY
-systemctl --user show-environment | grep XAUTHORITY
-```
-
-## Troubleshooting
-
-### Display Not Detected
-
-**Problem**: After reboot, xrandr doesn't show the virtual display
-
-**Solutions**:
-```bash
-# Check X11 logs for errors
-sudo grep -i "edid\|dfp" /var/log/Xorg.0.log
-
-# Verify EDID file exists
-ls -lh /etc/X11/4k120.edid
-
-# Check xorg.conf syntax
-sudo nvidia-xconfig --query-gpu-info
-```
-
-### Sunshine Not Starting
-
-**Problem**: Sunshine service fails to start
-
-**Solutions**:
-```bash
-# Check service status
-systemctl --user status sunshine
-
-# View logs
-journalctl --user -u sunshine -f
-
-# Verify environment variables
-systemctl --user show sunshine -p Environment
-```
-
-### Sunshine Not Starting Automatically After Reboot
-
-**Problem**: Sunshine doesn't start automatically after system reboot, only after GUI login
-
-**Cause**: Systemd user services require either a user session or "lingering" to start at boot.
-
-**Note on PolicyKit**: `loginctl enable-linger` uses the `org.freedesktop.login1.set-user-linger` PolicyKit privilege. On most desktop systems this triggers an interactive authentication prompt when enabling lingering for your own user. On systems without `policykit-1` (or with restrictive PolicyKit rules), it may fail with `Access denied`.
-
-**Solutions**:
-```bash
-# Enable session lingering for your user (allows services to start at boot)
-loginctl enable-linger $(whoami)
-
-# If the above fails (e.g., no PolicyKit / Access denied), use sudo as a fallback
-sudo loginctl enable-linger $(whoami)
-
-# Verify lingering is enabled
-loginctl show-user $(whoami) --property=Linger
-
-# Re-enable Sunshine auto-start
-systemctl --user enable sunshine
-
-# Reboot and verify
-sudo reboot
-```
-
-**Note**: The installer now enables lingering automatically when you choose auto-start.
-
-### Connection Issues
-
-**Problem**: Moonlight can't find or connect to the DGX Spark
-
-**Solutions**:
-```bash
-# Verify Sunshine is running
-systemctl --user status sunshine
-
-# Check firewall (allow ports 47984-47990)
-sudo ufw status
-sudo ufw allow 47984:47990/tcp
-sudo ufw allow 47998:48010/udp
-
-# Test local connection
-curl -k https://localhost:47990
+MIT (see LICENSE)
 ```
 
 ### Low Performance / Stuttering
