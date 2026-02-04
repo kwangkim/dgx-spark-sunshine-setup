@@ -13,7 +13,7 @@ Stream your DGX Spark desktop at high quality (up to 1440p @ 120Hz or 4K @ 60Hz)
 - **Interactive Installation**: Guided prompts for resolution, codec, and bitrate selection
 - **Automatic Backups**: All existing configurations are backed up before modification
 - **Hardware-Accelerated Encoding**: Uses NVENC (NVIDIA's hardware encoder) for optimal performance
-- 
+-
 ## Supported Configurations
 
 ### Display Resolutions
@@ -172,8 +172,14 @@ After installation, you'll find:
 
 ### Systemd Override
 - **Location**: `~/.config/systemd/user/sunshine.service.d/override.conf`
-- **Purpose**: Sets DISPLAY and XAUTHORITY environment variables
+- **Purpose**: Sets `DISPLAY` for Sunshine; `XAUTHORITY` should be inherited from your X session environment
 - **Auto-start**: Sunshine will start automatically on login
+
+If Sunshine can’t access your X session, ensure your session exports variables into the user systemd manager:
+```bash
+dbus-update-activation-environment --systemd DISPLAY XAUTHORITY
+systemctl --user show-environment | grep XAUTHORITY
+```
 
 ## Troubleshooting
 
@@ -215,10 +221,15 @@ systemctl --user show sunshine -p Environment
 
 **Cause**: Systemd user services require either a user session or "lingering" to start at boot.
 
+**Note on PolicyKit**: `loginctl enable-linger` uses the `org.freedesktop.login1.set-user-linger` PolicyKit privilege. On most desktop systems this triggers an interactive authentication prompt when enabling lingering for your own user. On systems without `policykit-1` (or with restrictive PolicyKit rules), it may fail with `Access denied`.
+
 **Solutions**:
 ```bash
 # Enable session lingering for your user (allows services to start at boot)
 loginctl enable-linger $(whoami)
+
+# If the above fails (e.g., no PolicyKit / Access denied), use sudo as a fallback
+sudo loginctl enable-linger $(whoami)
 
 # Verify lingering is enabled
 loginctl show-user $(whoami) --property=Linger

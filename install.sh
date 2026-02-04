@@ -99,6 +99,14 @@ prompt_user() {
     read -r "${var_name}"
 }
 
+prompt_secret() {
+    local prompt="$1"
+    local var_name="$2"
+    echo -ne "${NVIDIA_GREEN}?${RESET} ${prompt}: "
+    read -rs "${var_name}"
+    echo ""
+}
+
 confirm() {
     local prompt="$1"
     local response
@@ -416,7 +424,7 @@ install_sunshine() {
     local download_url
     # Specifically get Ubuntu 24.04 ARM64 package (not Debian Trixie which has library version mismatches)
     download_url=$(echo "${release_info}" | grep -o "https://[^\"]*sunshine-ubuntu-24\.04-arm64\.deb" | head -1)
-    
+
     # Fallback to any Ubuntu ARM64 package
     if [[ -z "${download_url}" ]]; then
         download_url=$(echo "${release_info}" | grep -o "https://[^\"]*sunshine-ubuntu.*arm64\.deb" | head -1)
@@ -485,17 +493,18 @@ configure_x11() {
     # Detect GPU BusID
     log_substep "Detecting NVIDIA GPU BusID..."
     local bus_id
-    # First try to find VGA controller from NVIDIA
-    bus_id=$(lspci | grep -i "VGA compatible controller: NVIDIA" | awk '{print $1}')
-    
-    # Fallback: try to find any NVIDIA GPU-like device
+    # Prefer fully-qualified domain:bus:device.function (via -D) and match both
+    # "VGA compatible controller" and "3D controller" classes.
+    bus_id=$(lspci -D | grep -Ei "NVIDIA" | grep -Ei "VGA compatible controller|3D controller" | awk '{print $1}' | head -n 1)
+
+    # Fallback: try to find any NVIDIA GPU-like device (still with -D for domain)
     if [[ -z "${bus_id}" ]]; then
-        bus_id=$(lspci | grep -i "nvidia.*gb10" | awk '{print $1}')
+        bus_id=$(lspci -D | grep -Ei "nvidia.*gb10" | awk '{print $1}' | head -n 1)
     fi
 
     if [[ -z "${bus_id}" ]]; then
         log_error "Failed to detect NVIDIA GPU BusID"
-        log_substep "Please check 'lspci | grep -i nvidia' output"
+        log_substep "Please check 'lspci -D | grep -i nvidia' output"
         exit 1
     fi
 
@@ -507,13 +516,13 @@ configure_x11() {
     bus=$(echo "${bus_id}" | cut -d: -f2)
     device=$(echo "${bus_id}" | cut -d: -f3 | cut -d. -f1)
     func=$(echo "${bus_id}" | cut -d. -f2)
-    
+
     # Convert hex to decimal
     domain=$((16#${domain}))
     bus=$((16#${bus}))
     device=$((16#${device}))
-    func=$((10#${func}))
-    
+    func=$((16#${func}))
+
     local pci_bus_id="PCI:${bus}:${device}:${func}"
 
     log_success "Detected BusID: ${pci_bus_id}"
@@ -548,7 +557,7 @@ configure_permissions() {
     log_substep "Configuring udev rules for uinput..."
     local udev_rule='KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"'
     echo "${udev_rule}" | sudo tee /etc/udev/rules.d/85-sunshine.rules > /dev/null
-    
+
     log_substep "Reloading udev rules..."
     sudo udevadm control --reload-rules
     sudo udevadm trigger
@@ -579,13 +588,13 @@ configure_sunshine() {
     log_substep "Configuring systemd user service..."
     mkdir -p "${SYSTEMD_USER_DIR}"
     mkdir -p "${SYSTEMD_USER_DIR}/sunshine.service.d"
-    
+
     # Install the base service file (newer Sunshine versions don't include one)
     if [[ ! -f "${SYSTEMD_USER_DIR}/sunshine.service" ]]; then
         log_substep "Installing sunshine.service..."
         cp "${TEMPLATES_DIR}/sunshine.service" "${SYSTEMD_USER_DIR}/sunshine.service"
     fi
-    
+
     # Install the override configuration
     cp "${TEMPLATES_DIR}/sunshine-override.conf" "${SYSTEMD_USER_DIR}/sunshine.service.d/override.conf"
 
@@ -599,20 +608,149 @@ configure_sunshine() {
     if confirm "Enable Sunshine to start automatically on login?"; then
         systemctl --user enable sunshine
         log_success "Sunshine service enabled (will start automatically on next login)"
-        
+
         # Enable lingering for user session persistence
         # This allows the user's systemd services to start at boot, even before GUI login
         log_substep "Enabling session persistence (lingering)..."
-        if loginctl enable-linger "$(whoami)" 2>/dev/null; then
+        if sudo loginctl enable-linger "$(whoami)"; then
             log_success "Session lingering enabled for reliable auto-start"
         else
             log_warning "Could not enable lingering - Sunshine may not start until first login"
-            log_substep "To enable manually: ${DIM}loginctl enable-linger $(whoami)${RESET}"
+            log_substep "To enable manually: ${DIM}sudo loginctl enable-linger $(whoami)${RESET}"
         fi
     else
         log_info "Sunshine service configured but not enabled for auto-start"
         log_substep "To start manually: ${DIM}systemctl --user start sunshine${RESET}"
         log_substep "To enable auto-start later: ${DIM}systemctl --user enable sunshine${RESET}"
+    fi
+
+    log_complete
+}
+
+# ============================================================================
+# Optional: Tailscale (Remote Access)
+# ============================================================================
+configure_tailscale() {
+    log_step "Optional: Tailscale Remote Access"
+
+    echo ""
+    if ! confirm "Install and configure Tailscale for remote access (VPN)?"; then
+        log_info "Skipping Tailscale setup"
+        log_complete
+        return
+    fi
+
+    if ! command -v apt-get &> /dev/null; then
+        log_warning "apt-get not found - cannot auto-install Tailscale on this system"
+        log_substep "Install Tailscale manually: ${DIM}https://tailscale.com/download/linux${RESET}"
+        log_complete
+        return
+    fi
+
+    if command -v tailscale &> /dev/null; then
+        log_success "Tailscale already installed"
+    else
+        log_substep "Installing Tailscale..."
+        if sudo apt-get update; then
+            if sudo apt-get install -y tailscale; then
+                log_success "Tailscale installed"
+            else
+                log_warning "Failed to install Tailscale via apt"
+                log_substep "To install manually: ${DIM}sudo apt-get update && sudo apt-get install -y tailscale${RESET}"
+                log_substep "Or see: ${DIM}https://tailscale.com/download/linux${RESET}"
+                log_complete
+                return
+            fi
+        else
+            log_warning "Failed to update package lists - skipping Tailscale installation"
+            log_substep "Try later: ${DIM}sudo apt-get update && sudo apt-get install -y tailscale${RESET}"
+            log_complete
+            return
+        fi
+    fi
+
+    log_substep "Enabling tailscaled service..."
+    if sudo systemctl enable --now tailscaled; then
+        log_success "tailscaled service enabled and started"
+    else
+        log_warning "Could not enable/start tailscaled"
+        log_substep "To start manually: ${DIM}sudo systemctl enable --now tailscaled${RESET}"
+        log_complete
+        return
+    fi
+
+    echo ""
+    if confirm "Install a systemd service to auto-connect at boot?"; then
+        if [[ -f "${TEMPLATES_DIR}/tailscale-autoconnect.service" ]] && [[ -f "${TEMPLATES_DIR}/tailscale-autoconnect.env.template" ]]; then
+            log_substep "Installing Tailscale autoconnect configuration..."
+
+            # Environment file (not secret)
+            sudo install -m 0644 "${TEMPLATES_DIR}/tailscale-autoconnect.env.template" /etc/default/tailscale-autoconnect
+
+            sudo install -m 0644 "${TEMPLATES_DIR}/tailscale-autoconnect.service" /etc/systemd/system/tailscale-autoconnect.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now tailscale-autoconnect.service
+            log_success "Tailscale autoconnect service installed (tailscale-autoconnect.service)"
+            log_substep "Optional: edit ${DIM}/etc/default/tailscale-autoconnect${RESET} to add args like ${DIM}--ssh${RESET}"
+        else
+            log_warning "Tailscale autoconnect templates not found - skipping service install"
+        fi
+    else
+        log_info "Skipping autoconnect service installation"
+    fi
+
+    echo ""
+    if confirm "Bring Tailscale up now (connect this machine to your tailnet)?"; then
+        local up_choice
+        local auth_key
+
+        echo ""
+        echo -e "${WHITE}${BOLD}Tailscale login method:${RESET}"
+        echo -e "${GRAY}  1)${RESET} Interactive login (recommended)"
+        echo -e "${GRAY}  2)${RESET} Auth key (non-interactive)"
+        echo ""
+        while true; do
+            prompt_user "Select (1-2)" up_choice
+            case "${up_choice}" in
+                1)
+                    log_substep "Running: ${DIM}sudo tailscale up${RESET}"
+                    if sudo tailscale up; then
+                        log_success "Tailscale is up"
+                    else
+                        log_warning "tailscale up failed or was cancelled"
+                        log_substep "To retry: ${DIM}sudo tailscale up${RESET}"
+                    fi
+                    break
+                    ;;
+                2)
+                    prompt_secret "Enter Tailscale auth key (tskey-auth-...)" auth_key
+                    if [[ -z "${auth_key}" ]]; then
+                        log_warning "No auth key provided; falling back to interactive login"
+                        if sudo tailscale up; then
+                            log_success "Tailscale is up"
+                        else
+                            log_warning "tailscale up failed or was cancelled"
+                            log_substep "To retry: ${DIM}sudo tailscale up${RESET}"
+                        fi
+                    else
+                        log_substep "Running: ${DIM}sudo tailscale up --authkey <hidden>${RESET}"
+                        if sudo tailscale up --authkey "${auth_key}"; then
+                            log_success "Tailscale is up"
+                        else
+                            log_warning "tailscale up failed"
+                            log_substep "To retry interactively: ${DIM}sudo tailscale up${RESET}"
+                        fi
+                    fi
+                    break
+                    ;;
+                *)
+                    log_error "Invalid selection. Please choose 1-2."
+                    ;;
+            esac
+        done
+    else
+        log_info "Tailscale installed; you can connect later"
+        log_substep "To connect: ${DIM}sudo tailscale up${RESET}"
     fi
 
     log_complete
@@ -757,6 +895,7 @@ main() {
     configure_permissions
     configure_sunshine
     validate_installation
+    configure_tailscale
 
     # Final instructions
     print_final_instructions

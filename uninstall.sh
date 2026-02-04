@@ -22,12 +22,6 @@ readonly BOLD='\033[1m'
 readonly DIM='\033[2m'
 
 # ============================================================================
-# Configuration
-# ============================================================================
-readonly SUNSHINE_CONFIG_DIR="${HOME}/.config/sunshine"
-readonly SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
-
-# ============================================================================
 # Utility Functions
 # ============================================================================
 log_info() {
@@ -58,6 +52,22 @@ log_substep() {
 log_complete() {
     echo -e "${BLUE}${BOLD}└─${RESET} ${BRIGHT_GREEN}Complete${RESET}"
 }
+
+# ============================================================================
+# Safety Guard
+# ============================================================================
+if [[ "${EUID}" -eq 0 ]]; then
+    log_error "Do not run this uninstaller with sudo/as root. It uses \$HOME and systemctl --user, which would target the root user and remove the wrong files/services."
+    log_info "Run it as the intended desktop user (no sudo). If you need privileges for package removal, the script will prompt via sudo when required."
+    log_info "If you must run under sudo, use: sudo -u <user> ./uninstall.sh"
+    exit 1
+fi
+
+# ============================================================================
+# Configuration
+# ============================================================================
+readonly SUNSHINE_CONFIG_DIR="${HOME}/.config/sunshine"
+readonly SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 
 confirm() {
     local prompt="$1"

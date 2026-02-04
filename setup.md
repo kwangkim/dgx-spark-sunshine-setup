@@ -1,12 +1,88 @@
-# Setting up Moonlight on iPad with Sunshine
+# Setting up Sunshine + Moonlight (iPad and/or Monitor)
 
-This guide explains how to connect your iPad to the Sunshine streaming server running on your DGX Spark system.
+This guide explains how to connect to the Sunshine streaming server running on your DGX Spark system.
+
+It includes two setup paths:
+
+- From another computer (monitor) via SSH (recommended)
+- Using only an iPad (Moonlight + Safari + SSH)
 
 ## Prerequisites
 
 1.  **Sunshine Running**: Ensure Sunshine is installed and running on your DGX Spark system.
     *   Verify by accessing the Web UI at `https://<YOUR_DGX_IP>:47990`.
 2.  **Network**: Your iPad and DGX Spark must be on the same network, or accessible via VPN/ZeroTier/Tailscale.
+
+## Important: X session environment (DISPLAY/XAUTHORITY)
+
+Sunshine runs as a user service and needs access to your X session. The recommended approach is to export your session environment into the systemd user manager at session start:
+
+```bash
+dbus-update-activation-environment --systemd DISPLAY XAUTHORITY
+```
+
+Verify the user manager sees it:
+
+```bash
+systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'
+```
+
+If `XAUTHORITY` is missing, Sunshine may start but capture a black screen.
+
+## Path A: Setup from another computer (monitor) via SSH (recommended)
+
+This is the most common “no local peripherals” workflow: use a laptop/desktop with a monitor to SSH into the DGX Spark and configure everything.
+
+1. From your other computer, SSH into the DGX as your normal user:
+    ```bash
+    ssh <user>@<YOUR_DGX_IP>
+    ```
+2. Run the installer:
+    ```bash
+    cd <path-to-this-repo>
+    ./install.sh
+    ```
+    - When it runs `sudo`, you’ll be prompted for your password in the SSH session.
+3. When prompted, choose to enable Sunshine auto-start.
+4. Reboot:
+    ```bash
+    sudo reboot
+    ```
+5. Open the Sunshine Web UI from the other computer’s browser to confirm it’s reachable:
+    - `https://<YOUR_DGX_IP>:47990`
+6. Ensure the DGX actually has a running graphical session on `:0`.
+    - Even if you configure Sunshine remotely, it still captures an X session running on the DGX.
+    - If nobody ever logs into the DGX desktop, there may be no session to capture.
+    - If you see a black screen later, you may need to log in once locally (just for initial login) or enable desktop auto-login in your display manager.
+7. Once a session exists, export the environment into systemd user manager (run this inside that session when possible):
+    ```bash
+    dbus-update-activation-environment --systemd DISPLAY XAUTHORITY
+    systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'
+    systemctl --user restart sunshine
+    ```
+8. Pair Moonlight from your iPad (see Step 2 below) and launch **Desktop**.
+
+## Path B: Setup using only an iPad (headless)
+
+This path assumes you can SSH into the DGX from the iPad.
+
+1. Install an SSH client on the iPad.
+2. SSH to the DGX as your normal user:
+    ```bash
+    ssh <user>@<YOUR_DGX_IP>
+    ```
+3. Run the installer:
+    ```bash
+    cd <path-to-this-repo>
+    ./install.sh
+    ```
+4. Reboot:
+    ```bash
+    sudo reboot
+    ```
+5. Ensure the DGX actually has a running graphical session on `:0`.
+    - Sunshine is configured with `DISPLAY=:0`. If no one ever logs in, there may be no active X session to capture.
+    - If you see a black screen, you may need to log in once locally (monitor/keyboard just for initial login) or enable desktop auto-login in your display manager.
 
 ## Step 1: Install Moonlight on iPad
 
