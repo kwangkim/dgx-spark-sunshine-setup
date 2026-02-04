@@ -130,11 +130,6 @@ dgx-spark-sunshine-setup/
     └── tailscale-autoconnect.env.template
 ```
 
-## License
-
-MIT (see LICENSE)
-```
-
 ### Low Performance / Stuttering
 
 **Problem**: Streaming is choppy or low quality
