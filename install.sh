@@ -786,10 +786,14 @@ configure_tailscale() {
             if sudo apt-get update && sudo apt-get install -y tailscale; then
                 log_success "Tailscale installed"
             else
-                log_warning "Failed to install Tailscale via apt"
-                log_substep "To install manually, see: ${DIM}https://tailscale.com/download/linux${RESET}"
-                log_complete
-                return
+                log_warning "Failed to install Tailscale via apt — trying official install script"
+                if curl -fsSL https://tailscale.com/install.sh | sh; then
+                    log_success "Tailscale installed via official install script"
+                else
+                    log_substep "To install manually, see: ${DIM}https://tailscale.com/download/linux${RESET}"
+                    log_complete
+                    return
+                fi
             fi
         fi
     fi
