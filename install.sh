@@ -739,21 +739,62 @@ configure_tailscale() {
         log_success "Tailscale already installed"
     else
         log_substep "Installing Tailscale..."
-        if sudo apt-get update; then
-            if sudo apt-get install -y tailscale; then
-                log_success "Tailscale installed"
+
+        # Detect Ubuntu codename for the Tailscale apt repo
+        local codename=""
+        if [[ -f /etc/os-release ]]; then
+            codename=$(. /etc/os-release && echo "${VERSION_CODENAME}")
+        fi
+        if [[ -z "${codename}" ]]; then
+            codename=$(lsb_release -cs 2>/dev/null || true)
+        fi
+
+        if [[ -n "${codename}" ]]; then
+            log_substep "Detected Ubuntu codename: ${DIM}${codename}${RESET}"
+            log_substep "Adding Tailscale package repository..."
+
+            local ts_base="https://pkgs.tailscale.com/stable/ubuntu"
+            if curl -fsSL "${ts_base}/${codename}.noarmor.gpg" | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null \
+                && curl -fsSL "${ts_base}/${codename}.tailscale-keyring.list" | sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null; then
+                log_success "Tailscale repository added"
             else
-                log_warning "Failed to install Tailscale via apt"
-                log_substep "To install manually: ${DIM}sudo apt-get update && sudo apt-get install -y tailscale${RESET}"
-                log_substep "Or see: ${DIM}https://tailscale.com/download/linux${RESET}"
+                log_warning "Failed to add Tailscale repository for codename '${codename}'"
+                log_substep "Falling back to Tailscale install script..."
+                if curl -fsSL https://tailscale.com/install.sh | sh; then
+                    log_success "Tailscale installed via install script"
+                else
+                    log_warning "Failed to install Tailscale"
+                    log_substep "To install manually, see: ${DIM}https://tailscale.com/download/linux${RESET}"
+                    log_complete
+                    return
+                fi
+            fi
+        else
+            log_warning "Could not detect Ubuntu codename — using Tailscale install script"
+            if curl -fsSL https://tailscale.com/install.sh | sh; then
+                log_success "Tailscale installed via install script"
+            else
+                log_warning "Failed to install Tailscale"
+                log_substep "To install manually, see: ${DIM}https://tailscale.com/download/linux${RESET}"
                 log_complete
                 return
             fi
-        else
-            log_warning "Failed to update package lists - skipping Tailscale installation"
-            log_substep "Try later: ${DIM}sudo apt-get update && sudo apt-get install -y tailscale${RESET}"
-            log_complete
-            return
+        fi
+
+        # Install the package if the repo was added (skip if install script already handled it)
+        if ! command -v tailscale &> /dev/null; then
+            if sudo apt-get update && sudo apt-get install -y tailscale; then
+                log_success "Tailscale installed"
+            else
+                log_warning "Failed to install Tailscale via apt — trying official install script"
+                if curl -fsSL https://tailscale.com/install.sh | sh; then
+                    log_success "Tailscale installed via official install script"
+                else
+                    log_substep "To install manually, see: ${DIM}https://tailscale.com/download/linux${RESET}"
+                    log_complete
+                    return
+                fi
+            fi
         fi
     fi
 
