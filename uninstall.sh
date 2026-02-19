@@ -2,7 +2,7 @@
 # ============================================================================
 # NVIDIA DGX Spark Sunshine Streaming Setup Uninstaller
 # ============================================================================
-# Completely removes Sunshine and all related configurations
+# Completely removes Sunshine, Tailscale, and all related configurations
 # ============================================================================
 
 set -eo pipefail  # Exit on error, catch pipeline failures
@@ -275,10 +275,10 @@ restore_backups() {
 
     # Find the latest backup
     local latest_backup
-    latest_backup=$(ls -dt "${backup_base}"/backup-* 2>/dev/null | head -1)
+    latest_backup=$(ls -dt "${backup_base}"/backup-* 2>/dev/null | head -1 || true)
     # Handle old format without backup- prefix
     if [[ -z "${latest_backup}" ]]; then
-        latest_backup=$(ls -dt "${backup_base}"/*/ 2>/dev/null | head -1)
+        latest_backup=$(ls -dt "${backup_base}"/*/ 2>/dev/null | head -1 || true)
     fi
 
     if [[ -z "${latest_backup}" || ! -d "${latest_backup}" ]]; then
@@ -317,6 +317,86 @@ restore_backups() {
 }
 
 # ============================================================================
+# Optional: Remove Tailscale
+# ============================================================================
+remove_tailscale() {
+    log_step "Optional: Tailscale Removal"
+
+    if ! command -v tailscale &> /dev/null && ! dpkg -l tailscale 2>/dev/null | grep -q "^[ih]i"; then
+        log_substep "Tailscale is not installed — skipping"
+        log_complete
+        return
+    fi
+
+    echo ""
+    echo -e "${YELLOW}Tailscale was optionally installed for remote access.${RESET}"
+    echo -e "${GRAY}You may want to keep it if you use it for other purposes.${RESET}"
+    echo ""
+
+    if ! confirm "Remove Tailscale?"; then
+        log_info "Keeping Tailscale"
+        log_complete
+        return
+    fi
+
+    # Stop and disable the autoconnect service if present
+    if systemctl is-active tailscale-autoconnect &>/dev/null || systemctl is-enabled tailscale-autoconnect &>/dev/null; then
+        log_substep "Stopping tailscale-autoconnect service..."
+        sudo systemctl disable --now tailscale-autoconnect 2>/dev/null || true
+        log_success "tailscale-autoconnect service stopped and disabled"
+    fi
+
+    # Remove the autoconnect service and env files
+    if [[ -f "/etc/systemd/system/tailscale-autoconnect.service" ]]; then
+        log_substep "Removing tailscale-autoconnect service file..."
+        sudo rm -f /etc/systemd/system/tailscale-autoconnect.service
+        log_success "tailscale-autoconnect service file removed"
+    fi
+    if [[ -f "/etc/default/tailscale-autoconnect" ]]; then
+        log_substep "Removing tailscale-autoconnect config..."
+        sudo rm -f /etc/default/tailscale-autoconnect
+        log_success "tailscale-autoconnect config removed"
+    fi
+
+    # Disconnect from tailnet before removing
+    if command -v tailscale &> /dev/null; then
+        log_substep "Disconnecting from Tailscale network..."
+        sudo tailscale down 2>/dev/null || true
+    fi
+
+    # Stop tailscaled
+    if systemctl is-active tailscaled &>/dev/null; then
+        log_substep "Stopping tailscaled service..."
+        sudo systemctl disable --now tailscaled 2>/dev/null || true
+        log_success "tailscaled stopped and disabled"
+    fi
+
+    # Remove the package
+    log_substep "Removing tailscale package..."
+    if sudo apt-get remove --purge -y tailscale 2>/dev/null; then
+        log_success "Tailscale package removed"
+    else
+        log_warning "Could not remove tailscale package via apt"
+    fi
+
+    # Remove the apt repository and signing key added by the installer
+    if [[ -f "/etc/apt/sources.list.d/tailscale.list" ]]; then
+        log_substep "Removing Tailscale apt repository..."
+        sudo rm -f /etc/apt/sources.list.d/tailscale.list
+        log_success "Tailscale apt source removed"
+    fi
+    if [[ -f "/usr/share/keyrings/tailscale-archive-keyring.gpg" ]]; then
+        log_substep "Removing Tailscale signing key..."
+        sudo rm -f /usr/share/keyrings/tailscale-archive-keyring.gpg
+        log_success "Tailscale signing key removed"
+    fi
+
+    sudo systemctl daemon-reload 2>/dev/null || true
+
+    log_complete
+}
+
+# ============================================================================
 # Print Final Message
 # ============================================================================
 print_final_message() {
@@ -332,6 +412,7 @@ print_final_message() {
     echo -e "${GRAY}  ✓${RESET} X11 xorg.conf (virtual display config)"
     echo -e "${GRAY}  ✓${RESET} Custom EDID file"
     echo -e "${GRAY}  ✓${RESET} Sunshine udev rules"
+    echo -e "${GRAY}  ✓${RESET} Tailscale (if selected)"
     echo ""
     echo -e "${YELLOW}${BOLD}Recommended:${RESET}"
     echo -e "${GRAY}  •${RESET} Restart your system: ${DIM}sudo reboot${RESET}"
@@ -360,6 +441,7 @@ main() {
     restore_backups
     remove_udev_rules
     remove_user_groups
+    remove_tailscale
 
     print_final_message
 }
