@@ -720,6 +720,8 @@ configure_sunshine() {
 # ============================================================================
 configure_tailscale() {
     log_step "Optional: Tailscale Remote Access"
+    local -a tailscale_default_up_args=(--accept-dns=false)
+    local tailscale_default_up_args_display="--accept-dns=false"
 
     echo ""
     if ! confirm "Install and configure Tailscale for remote access (VPN)?"; then
@@ -808,6 +810,9 @@ configure_tailscale() {
         return
     fi
 
+    log_substep "Defaulting Tailscale to preserve local DNS (${DIM}${tailscale_default_up_args_display}${RESET})"
+    log_substep "You can opt into tailnet DNS later if you want MagicDNS or split DNS"
+
     echo ""
     if confirm "Install a systemd service to auto-connect at boot?"; then
         if [[ -f "${TEMPLATES_DIR}/tailscale-autoconnect.service" ]] && [[ -f "${TEMPLATES_DIR}/tailscale-autoconnect.env.template" ]]; then
@@ -820,7 +825,7 @@ configure_tailscale() {
             sudo systemctl daemon-reload
             sudo systemctl enable --now tailscale-autoconnect.service
             log_success "Tailscale autoconnect service installed (tailscale-autoconnect.service)"
-            log_substep "Optional: edit ${DIM}/etc/default/tailscale-autoconnect${RESET} to add args like ${DIM}--ssh${RESET}"
+            log_substep "Optional: edit ${DIM}/etc/default/tailscale-autoconnect${RESET} to add args like ${DIM}--accept-dns=false --ssh${RESET}"
         else
             log_warning "Tailscale autoconnect templates not found - skipping service install"
         fi
@@ -842,12 +847,12 @@ configure_tailscale() {
             prompt_user "Select (1-2)" up_choice
             case "${up_choice}" in
                 1)
-                    log_substep "Running: ${DIM}sudo tailscale up${RESET}"
-                    if sudo tailscale up; then
+                    log_substep "Running: ${DIM}sudo tailscale up ${tailscale_default_up_args_display}${RESET}"
+                    if sudo tailscale up "${tailscale_default_up_args[@]}"; then
                         log_success "Tailscale is up"
                     else
                         log_warning "tailscale up failed or was cancelled"
-                        log_substep "To retry: ${DIM}sudo tailscale up${RESET}"
+                        log_substep "To retry: ${DIM}sudo tailscale up ${tailscale_default_up_args_display}${RESET}"
                     fi
                     break
                     ;;
@@ -858,19 +863,19 @@ configure_tailscale() {
                     prompt_secret "Enter Tailscale auth key (tskey-auth-...)" auth_key
                     if [[ -z "${auth_key}" ]]; then
                         log_warning "No auth key provided; falling back to interactive login"
-                        if sudo tailscale up; then
+                        if sudo tailscale up "${tailscale_default_up_args[@]}"; then
                             log_success "Tailscale is up"
                         else
                             log_warning "tailscale up failed or was cancelled"
-                            log_substep "To retry: ${DIM}sudo tailscale up${RESET}"
+                            log_substep "To retry: ${DIM}sudo tailscale up ${tailscale_default_up_args_display}${RESET}"
                         fi
                     else
-                        log_substep "Running: ${DIM}sudo tailscale up --authkey <hidden>${RESET}"
-                        if sudo tailscale up --authkey "${auth_key}"; then
+                        log_substep "Running: ${DIM}sudo tailscale up ${tailscale_default_up_args_display} --authkey <hidden>${RESET}"
+                        if sudo tailscale up "${tailscale_default_up_args[@]}" --authkey "${auth_key}"; then
                             log_success "Tailscale is up"
                         else
                             log_warning "tailscale up failed"
-                            log_substep "To retry interactively: ${DIM}sudo tailscale up${RESET}"
+                            log_substep "To retry interactively: ${DIM}sudo tailscale up ${tailscale_default_up_args_display}${RESET}"
                         fi
                     fi
                     break
@@ -882,7 +887,7 @@ configure_tailscale() {
         done
     else
         log_info "Tailscale installed; you can connect later"
-        log_substep "To connect: ${DIM}sudo tailscale up${RESET}"
+        log_substep "To connect: ${DIM}sudo tailscale up ${tailscale_default_up_args_display}${RESET}"
     fi
 
     log_complete

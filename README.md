@@ -110,10 +110,11 @@ If you want it to run every login, `~/.xprofile` is a simple option on many desk
 
 During install you can choose to install Tailscale.
 
-- The installer can enable `tailscaled` and optionally run `sudo tailscale up`
+- The installer can enable `tailscaled` and optionally run `sudo tailscale up --accept-dns=false`
 - It can also install an optional boot-time unit `templates/tailscale-autoconnect.service` that runs `tailscale up` on boot
-  - Default is safe: it does **not** disable DNS and does **not** include tags
-  - If you want Tailscale SSH later, set `TS_UP_EXTRA_ARGS="--ssh"` in `/etc/default/tailscale-autoconnect`
+  - Default is safe for general internet access: it preserves the machine's existing DNS with `--accept-dns=false`
+  - If you want Tailscale SSH later, set `TS_UP_EXTRA_ARGS="--accept-dns=false --ssh"` in `/etc/default/tailscale-autoconnect`
+  - If you want tailnet DNS or MagicDNS later, change the setting to `TS_UP_EXTRA_ARGS="--accept-dns=true"`
 
 ### iPad / SSH Setup
 
@@ -189,6 +190,26 @@ systemctl --user start sunshine
 ```bash
 curl -k https://localhost:47990
 sudo ufw status
+```
+
+### Tailscale DNS Health Warning
+
+If Tailscale reports `can't reach the configured DNS servers`, the tailnet is advertising DNS servers that this machine cannot currently reach. The installer defaults to `--accept-dns=false` to avoid breaking normal internet access on headless streaming boxes.
+
+To disable tailnet DNS on an already-configured machine:
+
+```bash
+sudo tailscale set --accept-dns=false
+sudoedit /etc/default/tailscale-autoconnect
+# Set: TS_UP_EXTRA_ARGS="--accept-dns=false"
+sudo systemctl restart tailscale-autoconnect
+```
+
+If you do want MagicDNS or split DNS, confirm the advertised DNS servers are reachable from this device, update `/etc/default/tailscale-autoconnect` to `TS_UP_EXTRA_ARGS="--accept-dns=true"` if that service is installed, and then re-enable it:
+
+```bash
+sudo tailscale set --accept-dns=true
+sudo systemctl restart tailscale-autoconnect
 ```
 
 ## Advanced Usage
