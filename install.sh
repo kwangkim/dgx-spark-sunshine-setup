@@ -561,8 +561,8 @@ configure_x11() {
         exit 1
     fi
 
-    # Convert from domain:bus:device.function to PCI:bus:device:function format
-    # lspci shows: 000f:01:00.0 -> we need: PCI:15:1:0
+    # Convert from domain:bus:device.function to Xorg BusID format.
+    # lspci shows: 000f:01:00.0 -> Xorg needs: PCI:1@15:0:0
     # Extract components
     local domain bus device func
     domain=$(echo "${bus_id}" | cut -d: -f1)
@@ -586,10 +586,15 @@ configure_x11() {
     device=$((16#${device}))
     func=$((16#${func}))
 
-    local pci_bus_id="PCI:${bus}:${device}:${func}"
+    local pci_bus_id
+    if [[ "${domain}" -eq 0 ]]; then
+        pci_bus_id="PCI:${bus}:${device}:${func}"
+    else
+        pci_bus_id="PCI:${bus}@${domain}:${device}:${func}"
+    fi
 
     # Validate BusID format for safe sed substitution
-    if [[ ! "${pci_bus_id}" =~ ^PCI:[0-9]+:[0-9]+:[0-9]+$ ]]; then
+    if [[ ! "${pci_bus_id}" =~ ^PCI:[0-9]+(@[0-9]+)?:[0-9]+:[0-9]+$ ]]; then
         log_error "Invalid BusID format generated: ${pci_bus_id}"
         exit 1
     fi
@@ -625,8 +630,16 @@ configure_x11() {
 configure_permissions() {
     log_step "Configuring Permissions"
 
-    log_substep "Adding current user to 'video' and 'input' groups..."
-    sudo usermod -aG video,input "${USER}"
+    local groups_to_add=("video" "input")
+    if getent group render > /dev/null 2>&1; then
+        groups_to_add+=("render")
+    fi
+
+    local group_list
+    group_list=$(IFS=,; echo "${groups_to_add[*]}")
+
+    log_substep "Adding current user to '${group_list}' groups..."
+    sudo usermod -aG "${group_list}" "${USER}"
     log_success "User added to groups"
 
     # NOTE: uinput access allows Sunshine to forward remote input (keyboard/mouse).

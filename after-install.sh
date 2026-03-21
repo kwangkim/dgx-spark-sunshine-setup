@@ -203,6 +203,15 @@ check_gpu_encoding() {
     gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader)
     log_success "GPU: $gpu_name"
 
+    if id -nG "$USER" | grep -qw render; then
+        log_success "User is in the render group"
+    else
+        log_warning "User is not in the render group"
+        echo -e "${GRAY}  Sunshine may fail to access /dev/dri/renderD128 without it.${RESET}"
+        echo -e "${GRAY}  Fix: ${DIM}sudo usermod -aG render $USER${RESET}"
+        echo -e "${GRAY}  Then log out/in or reboot.${RESET}"
+    fi
+
     # Check for encoder sessions
     local encoder_sessions
     encoder_sessions=$(nvidia-smi --query-gpu=encoder.stats.sessionCount --format=csv,noheader 2>/dev/null || echo "N/A")
