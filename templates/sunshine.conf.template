@@ -8,7 +8,8 @@
 # origin_web_ui_allowed = wan
 
 # Display Output
-output_name = HDMI-0
+# Leave output_name unset so Sunshine can pick the active display automatically.
+# Hardcoding HDMI-0 breaks on systems whose X11 output name or display id differs.
 
 # Video Encoding Settings
 encoder = nvenc

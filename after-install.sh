@@ -164,6 +164,33 @@ check_sunshine_service() {
     fi
 }
 
+check_session_environment() {
+    log_section "X11 Session Environment"
+
+    local user_env
+    user_env=$(systemctl --user show-environment 2>/dev/null || true)
+
+    if echo "$user_env" | grep -q '^DISPLAY='; then
+        log_success "DISPLAY is present in the systemd user manager"
+        echo "$user_env" | grep '^DISPLAY=' | sed "s/^/${GRAY}  /"
+        echo -e "${RESET}"
+    else
+        log_warning "DISPLAY is missing from the systemd user manager"
+    fi
+
+    if echo "$user_env" | grep -q '^XAUTHORITY='; then
+        log_success "XAUTHORITY is present in the systemd user manager"
+        echo "$user_env" | grep '^XAUTHORITY=' | sed "s/^/${GRAY}  /"
+        echo -e "${RESET}"
+    else
+        log_warning "XAUTHORITY is missing from the systemd user manager"
+        echo -e "${GRAY}  Sunshine can run but still capture a black screen without it.${RESET}"
+        echo -e "${GRAY}  Log into the desktop once and run:${RESET}"
+        echo -e "${GRAY}    ${DIM}dbus-update-activation-environment --systemd DISPLAY XAUTHORITY${RESET}"
+        echo -e "${GRAY}    ${DIM}systemctl --user restart sunshine${RESET}"
+    fi
+}
+
 check_gpu_encoding() {
     log_section "GPU Encoding Capabilities"
 
@@ -382,15 +409,16 @@ show_menu() {
     echo -e "${GRAY}  [3]${RESET} Check Sunshine service"
     echo -e "${GRAY}  [4]${RESET} Check GPU encoding"
     echo -e "${GRAY}  [5]${RESET} Check network access"
+    echo -e "${GRAY}  [6]${RESET} Check X11 session environment"
     echo ""
-    echo -e "${GRAY}  [6]${RESET} View Sunshine logs"
-    echo -e "${GRAY}  [7]${RESET} View X11 logs"
+    echo -e "${GRAY}  [7]${RESET} View Sunshine logs"
+    echo -e "${GRAY}  [8]${RESET} View X11 logs"
     echo ""
-    echo -e "${GRAY}  [8]${RESET} Start Sunshine"
-    echo -e "${GRAY}  [9]${RESET} Restart Sunshine"
-    echo -e "${GRAY}  [10]${RESET} Stop Sunshine"
-    echo -e "${GRAY}  [11]${RESET} Reset credentials"
-    echo -e "${GRAY}  [12]${RESET} Test hardware encoding"
+    echo -e "${GRAY}  [9]${RESET} Start Sunshine"
+    echo -e "${GRAY}  [10]${RESET} Restart Sunshine"
+    echo -e "${GRAY}  [11]${RESET} Stop Sunshine"
+    echo -e "${GRAY}  [12]${RESET} Reset credentials"
+    echo -e "${GRAY}  [13]${RESET} Test hardware encoding"
     echo ""
     echo -e "${GRAY}  [q]${RESET} Quit"
     echo ""
@@ -401,6 +429,7 @@ run_all_checks() {
     print_header
     check_virtual_display
     check_sunshine_service
+    check_session_environment
     check_gpu_encoding
     check_network_access
 
@@ -435,6 +464,10 @@ main() {
                 check_sunshine_service
                 exit 0
                 ;;
+            --check-env)
+                check_session_environment
+                exit 0
+                ;;
             --start)
                 start_sunshine
                 exit 0
@@ -449,7 +482,7 @@ main() {
                 ;;
             *)
                 echo "Unknown option: $1"
-                echo "Usage: $0 [--check-all|--check-display|--check-sunshine|--start|--restart|--logs]"
+                echo "Usage: $0 [--check-all|--check-display|--check-sunshine|--check-env|--start|--restart|--logs]"
                 exit 1
                 ;;
         esac
@@ -468,13 +501,14 @@ main() {
             3) check_sunshine_service ;;
             4) check_gpu_encoding ;;
             5) check_network_access ;;
-            6) view_sunshine_logs ;;
-            7) view_x11_logs ;;
-            8) start_sunshine ;;
-            9) restart_sunshine ;;
-            10) stop_sunshine ;;
-            11) reset_credentials ;;
-            12) test_encoding ;;
+            6) check_session_environment ;;
+            7) view_sunshine_logs ;;
+            8) view_x11_logs ;;
+            9) start_sunshine ;;
+            10) restart_sunshine ;;
+            11) stop_sunshine ;;
+            12) reset_credentials ;;
+            13) test_encoding ;;
             q|Q)
                 echo ""
                 log_info "Goodbye!"

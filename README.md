@@ -29,6 +29,7 @@ Then open Sunshine Web UI and pair Moonlight:
 - Generates `/etc/X11/xorg.conf` using NVIDIA `CustomEDID`
 - Writes Sunshine config to `~/.config/sunshine/sunshine.conf`
 - Installs a systemd **user** service for Sunshine
+- Installs a desktop autostart hook that syncs `DISPLAY`/`XAUTHORITY` into the user systemd manager
 - Optionally enables autostart and attempts to enable lingering (`sudo loginctl enable-linger $(whoami)`)
 - Optionally offers to install/configure Tailscale
 
@@ -104,7 +105,7 @@ dbus-update-activation-environment --systemd DISPLAY XAUTHORITY
 systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'
 ```
 
-If you want it to run every login, `~/.xprofile` is a simple option on many desktops.
+The installer also drops a desktop autostart entry that runs this sync on each GUI login and restarts Sunshine if it is already running.
 
 ### Tailscale (Optional)
 
@@ -139,6 +140,13 @@ journalctl --user -u sunshine -n 200 --no-pager
 
 ```bash
 systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'
+```
+
+- If the local desktop went blank after install, remove the generated Xorg config from a console or SSH session and reboot:
+
+```bash
+sudo mv /etc/X11/xorg.conf /etc/X11/xorg.conf.disabled
+sudo reboot
 ```
 
 ### Autostart After Reboot

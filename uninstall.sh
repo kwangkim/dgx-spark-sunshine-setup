@@ -68,6 +68,7 @@ fi
 # ============================================================================
 readonly SUNSHINE_CONFIG_DIR="${HOME}/.config/sunshine"
 readonly SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+readonly AUTOSTART_DIR="${HOME}/.config/autostart"
 
 confirm() {
     local prompt="$1"
@@ -165,6 +166,12 @@ remove_configurations() {
         log_substep "Removing sunshine.service.d override directory..."
         rm -rf "${SYSTEMD_USER_DIR}/sunshine.service.d"
         log_success "Systemd override directory removed"
+    fi
+
+    if [[ -f "${AUTOSTART_DIR}/sunshine-systemd-env.desktop" ]]; then
+        log_substep "Removing Sunshine X11 environment sync autostart hook..."
+        rm -f "${AUTOSTART_DIR}/sunshine-systemd-env.desktop"
+        log_success "Autostart hook removed"
     fi
 
     # Reload systemd

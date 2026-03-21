@@ -29,6 +29,8 @@ systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'
 
 If `XAUTHORITY` is missing, Sunshine may start but capture a black screen.
 
+The installer now adds a desktop autostart entry that runs this sync automatically on GUI login and restarts Sunshine if it was already running.
+
 ## Path A: Setup from another computer (monitor) via SSH (recommended)
 
 This is the most common “no local peripherals” workflow: use a laptop/desktop with a monitor to SSH into the DGX Spark and configure everything.
@@ -126,8 +128,9 @@ To get the best experience on iPad Pro 12.9" (or other models), you should match
 ### Troubleshooting
 
 *   **Black Screen / No Display**:
-    *   Ensure the HDMI dummy plug is connected if the system is headless.
-    *   Check if the X server is running: `systemctl status display-manager`.
+    *   Ensure the X server is running: `systemctl status display-manager`.
+    *   Check the systemd user environment: `systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'`
+    *   If the local desktop went blank after install, disable the generated config and reboot: `sudo mv /etc/X11/xorg.conf /etc/X11/xorg.conf.disabled && sudo reboot`
 *   **Input Lag**:
     *   Ensure Game Mode on your TV/Monitor is ON if connected (though less relevant for iPad).
     *   Use 5GHz Wi-Fi or a wired Ethernet adapter for the iPad for best results.

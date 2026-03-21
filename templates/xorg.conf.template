@@ -23,8 +23,11 @@ Section "Device"
     VendorName     "NVIDIA Corporation"
     BoardName      "GB10"
     BusID          "{{BUS_ID}}"
-    Option         "ConnectedMonitor" "TV-0"
-    Option         "CustomEDID" "TV-0:{{EDID_PATH}}"
+    # Use a generic digital flat panel target for the virtual headless display.
+    # "TV-0" can leave the desktop blank on systems that only expose DFP outputs.
+    Option         "ConnectedMonitor" "DFP"
+    Option         "UseDisplayDevice" "DFP"
+    Option         "CustomEDID" "DFP:{{EDID_PATH}}"
     Option         "IgnoreEDID" "false"
     Option         "UseEdidDpi" "false"
     Option         "AllowEmptyInitialConfiguration" "true"

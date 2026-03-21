@@ -33,6 +33,7 @@ readonly BACKUP_DIR="${HOME}/.sunshine-setup-backups/$(date +%Y%m%d-%H%M%S)"
 readonly SUNSHINE_RELEASE_URL="https://api.github.com/repos/LizardByte/Sunshine/releases/latest"
 readonly SUNSHINE_CONFIG_DIR="${HOME}/.config/sunshine"
 readonly SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+readonly AUTOSTART_DIR="${HOME}/.config/autostart"
 
 # User selections (set via prompts)
 RESOLUTION=""
@@ -686,10 +687,39 @@ configure_sunshine() {
     fi
     cp "${TEMPLATES_DIR}/sunshine-override.conf" "${SYSTEMD_USER_DIR}/sunshine.service.d/override.conf"
 
+    # Install a desktop autostart hook so the systemd user manager learns the
+    # real X11 session environment after login, then restart Sunshine if needed.
+    log_substep "Installing GUI session environment sync hook..."
+    if [[ ! -f "${TEMPLATES_DIR}/sunshine-systemd-env.desktop" ]]; then
+        log_error "sunshine-systemd-env.desktop template not found"
+        exit 1
+    fi
+    mkdir -p "${AUTOSTART_DIR}"
+    cp "${TEMPLATES_DIR}/sunshine-systemd-env.desktop" "${AUTOSTART_DIR}/sunshine-systemd-env.desktop"
+    log_success "GUI session environment sync installed"
+
     # Reload systemd
     log_substep "Reloading systemd configuration..."
     systemctl --user daemon-reload
     log_success "Systemd configuration reloaded"
+
+    log_substep "Importing DISPLAY/XAUTHORITY into the systemd user manager when available..."
+    if [[ "${DISPLAY:-}" =~ ^:[0-9]+(\.[0-9]+)?$ ]] && [[ -n "${XAUTHORITY:-}" ]]; then
+        if dbus-update-activation-environment --systemd DISPLAY XAUTHORITY; then
+            log_success "Current X11 session environment imported"
+            if systemctl --user is-active sunshine &> /dev/null; then
+                systemctl --user restart sunshine
+                log_success "Sunshine restarted to pick up the updated X11 environment"
+            else
+                log_substep "Sunshine is not running yet; it will use the environment on first start"
+            fi
+        else
+            log_warning "Could not import current X11 environment into systemd"
+            log_substep "The login hook will retry this automatically after your next GUI login"
+        fi
+    else
+        log_substep "Current shell is not a local X11 session; the login hook will sync it after GUI login"
+    fi
 
     # Ask if they want auto-start
     echo ""
@@ -952,6 +982,15 @@ validate_installation() {
         ((errors++))
     fi
 
+    # Check GUI session environment sync hook
+    log_substep "Checking GUI session environment sync hook..."
+    if [[ -f "${AUTOSTART_DIR}/sunshine-systemd-env.desktop" ]]; then
+        log_success "GUI session environment sync hook exists"
+    else
+        log_error "GUI session environment sync hook not found"
+        ((errors++))
+    fi
+
     if [[ ${errors} -gt 0 ]]; then
         log_warning "Validation completed with ${errors} error(s)"
     else
@@ -979,6 +1018,7 @@ print_final_instructions() {
     echo -e "${NVIDIA_GREEN}2.${RESET} ${BOLD}Run the post-installation helper${RESET} ${DIM}(Recommended)${RESET}"
     echo -e "${GRAY}   └─${RESET} Run: ${DIM}./after-install.sh${RESET}"
     echo -e "${GRAY}   └─${RESET} The helper will verify your installation and guide you through setup"
+    echo -e "${GRAY}   └─${RESET} On first GUI login, the installer now syncs DISPLAY/XAUTHORITY into systemd automatically"
     echo ""
     echo -e "${WHITE}${BOLD}What the helper does:${RESET}"
     echo -e "${GRAY}  ✓${RESET} Checks virtual display (${RESOLUTION} @ ${REFRESH_RATE}Hz)"
@@ -994,9 +1034,10 @@ print_final_instructions() {
     echo ""
     echo -e "${WHITE}${BOLD}Manual Setup (if not using helper):${RESET}"
     echo -e "${GRAY}  1.${RESET} Verify display: ${DIM}xrandr${RESET}"
-    echo -e "${GRAY}  2.${RESET} Start Sunshine: ${DIM}systemctl --user start sunshine${RESET}"
-    echo -e "${GRAY}  3.${RESET} Configure at: ${DIM}https://localhost:47990${RESET}"
-    echo -e "${GRAY}  4.${RESET} Connect with: ${DIM}Moonlight client (moonlight-stream.org)${RESET}"
+    echo -e "${GRAY}  2.${RESET} Verify systemd sees your X11 session: ${DIM}systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'${RESET}"
+    echo -e "${GRAY}  3.${RESET} Start Sunshine: ${DIM}systemctl --user start sunshine${RESET}"
+    echo -e "${GRAY}  4.${RESET} Configure at: ${DIM}https://localhost:47990${RESET}"
+    echo -e "${GRAY}  5.${RESET} Connect with: ${DIM}Moonlight client (moonlight-stream.org)${RESET}"
     echo ""
     echo -e "${WHITE}${BOLD}Backups Saved To:${RESET}"
     echo -e "${GRAY}  •${RESET} ${BACKUP_DIR}"

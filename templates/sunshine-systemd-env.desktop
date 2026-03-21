@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Sunshine X11 Environment Sync
+Comment=Sync DISPLAY and XAUTHORITY into the user systemd manager for Sunshine
+Exec=/bin/sh -lc "dbus-update-activation-environment --systemd DISPLAY XAUTHORITY && systemctl --user try-restart sunshine.service >/dev/null 2>&1 || true"
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
